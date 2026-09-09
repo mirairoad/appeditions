@@ -13,6 +13,26 @@ Drop your simulator captures in, pick a look, write a headline per screen, and
 get one folder of correctly-sized PNGs per language. It tells you at every point
 what is still missing before the set can be uploaded.
 
+<p align="center">
+  <img src="docs/screenshots/the-set.png" alt="The set: seven store tiles for a version, each drawn by the renderer that writes the export" width="900"><br>
+  <em>The set — every tile this version exports, drawn by the same code that
+  writes the files. What you are looking at is a PNG the app rendered, not a
+  preview of one.</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/projects.png" alt="The projects list, one card per app" width="900"><br>
+  <em>One project per app. Its screenshots, its languages and its look live
+  together.</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/new-version.png" alt="The new version dialog: version string, device targets and the store listing" width="900"><br>
+  <em>A new version starts as a copy of the last one. It owns its own screens,
+  its own store slots and its own listing — a release can ship to fewer devices
+  than the one before it.</em>
+</p>
+
 - **Projects that persist.** Screenshots are copied into the project's own
   directory and never modified again — every frame, crop and scale happens at
   render time, so next release is re-dropping the new captures, not redoing the
