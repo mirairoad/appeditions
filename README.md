@@ -64,7 +64,8 @@ what is still missing before the set can be uploaded.
 
 ## Run it
 
-You need Go 1.25 and, for the stylesheet only, Node.
+You need Go 1.25. Nothing else — the stylesheet is committed, and rebuilding
+it uses Tailwind's standalone binary rather than a Node toolchain.
 
 ```bash
 git clone https://github.com/mirairoad/appeditions.git && cd appeditions
@@ -84,7 +85,7 @@ a plain server on `:9010` if you would rather use a browser.
 | `make dev-web` | The watched loop without a window |
 | `make test` | Go tests, including the renderer's visual dump |
 | `make check` | The framework conventions, enforced |
-| `make css` | Rebuild the stylesheet (the only target that needs Node) |
+| `make css` | Rebuild the stylesheet (fetches the pinned Tailwind binary) |
 
 ## Install it
 

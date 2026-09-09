@@ -1,11 +1,15 @@
 /* AppEditions's whole stylesheet: Tailwind v4 + shadcn-templ's style-nova.
  *
  * `make css` compiles this to client/public/app.css, which is committed, so
- * `make`, `make dev` and `go test` stay Node-free. Re-run `make css` after
- * using a Tailwind class no source used before — the compiler only emits what
- * it finds in the @source globs, which the Make target writes into the
- * generated app.sources.css beside this file. */
-@import "../../.howl/tailwind/node_modules/tailwindcss/index.css";
+ * `make`, `make dev` and `go test` never build a stylesheet at all. Re-run
+ * `make css` after using a Tailwind class no source used before — the compiler
+ * only emits what it finds in the @source globs, which the Make target writes
+ * into the generated app.sources.css beside this file.
+ *
+ * The bare specifier resolves inside the standalone Tailwind binary, which
+ * carries its own copy of the framework. Spelling it as a path into
+ * node_modules, as this did, is what made npm a build dependency. */
+@import "tailwindcss";
 @import "./app.sources.css";
 
 @custom-variant dark (&:where(.dark, .dark *));

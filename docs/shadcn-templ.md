@@ -14,7 +14,8 @@ The supported workflow copies component source into the application with the CLI
 
 - Every page imports shadcn-templ packages directly.
 - `client/styles/app.css` is the stylesheet source: Tailwind, the three upstream imports, AppEditions's theme tokens on `:root`, and a short unlayered block for the preview tiles, the drop zone and the disclosure panels.
-- `make css` compiles it to `client/public/app.css`, which is committed, so `make`, `make dev` and `go test` need no Node/npm. It also writes the gitignored `client/styles/app.sources.css`, which carries this machine's module-cache path.
+- `make css` compiles it to `client/public/app.css`, which is committed, so `make`, `make dev` and `go test` build no stylesheet at all. It also writes the gitignored `client/styles/app.sources.css`, which carries this machine's module-cache path.
+- The compiler is the Tailwind v4 **standalone binary**, which is what shadcn-templ's own installation notes call for. `make css` fetches it to `.howl/tailwind/tailwindcss-<version>` and pins the version; set `TAILWIND=` to use one you already have. `client/styles/app.css` imports the bare specifier `tailwindcss`, which resolves inside that binary — writing it as a path into `node_modules`, as it once did, is what made npm a build dependency.
 - **Run `make css` before `make`, never after.** The binary embeds `client/public`, so a stylesheet rebuilt after the go build is one the server does not serve.
 - Tailwind only emits classes it finds in the `@source` globs — `client/pages/**/*.templ`, `client/ui/**/*.templ`, and `client/public/forge.js`. **A class used only in a dynamically built string in forge.js must be written out in full**, or it will not exist in the bundle. `forge.js` builds the toast's classes that way; they are spelled out for this reason.
 - `<html class="dark style-nova">`. `style-nova.css` nests every `cn-*` rule under `.style-nova`; without that class every component renders unstyled but structurally correct, which is a confusing failure. `dark` is what the `dark:` variants key off.
@@ -110,7 +111,7 @@ Do not edit the Go module cache. Copy selected components into a leaf package su
 ## Commands
 
 ```bash
-make css   # rebuild client/public/app.css — the only target that needs Node
+make css   # rebuild client/public/app.css — fetches the pinned Tailwind binary
 make       # endpoints + routes + templ generation + the binary
 make test
 ```

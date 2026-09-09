@@ -95,17 +95,46 @@ package: desktop
 		-bin ./$(DESKTOP) -name "$(APP_NAME)" -id $(APP_ID) -version $(VERSION) \
 		$(if $(TARGET),-os $(TARGET))
 
-# The only target that needs Node, and the only one that writes
-# client/public/app.css — which is committed, so every other target and CI stay
-# offline. Run it BEFORE `make`, not after: the binary embeds client/public, so
-# a stylesheet rebuilt after the go build is one the server does not serve.
+# Tailwind, as the standalone binary: one file, no Node, no npm. This is what
+# shadcn-templ's own installation notes call for, and it is pinned because v2 is
+# beta and the upstream advice is to pin exact versions.
+#
+# Cached under .howl/, which is gitignored, and named for the version so a bump
+# fetches rather than silently reusing the old compiler. Point TAILWIND at a
+# binary you already have to skip the download entirely.
+TAILWIND_VERSION := 4.1.18
+TAILWIND ?= .howl/tailwind/tailwindcss-$(TAILWIND_VERSION)
+
+$(TAILWIND):
+	@mkdir -p $(dir $@)
+	@set -e; \
+	case "$$(uname -s)" in \
+		Darwin) os=macos ;; \
+		Linux)  os=linux ;; \
+		*) echo "no Tailwind standalone build for $$(uname -s)" >&2; exit 1 ;; \
+	esac; \
+	case "$$(uname -m)" in \
+		arm64|aarch64) arch=arm64 ;; \
+		x86_64|amd64)  arch=x64 ;; \
+		*) echo "no Tailwind standalone build for $$(uname -m)" >&2; exit 1 ;; \
+	esac; \
+	libc=; \
+	if [ "$$os" = linux ] && ldd --version 2>&1 | grep -qi musl; then libc=-musl; fi; \
+	url="https://github.com/tailwindlabs/tailwindcss/releases/download/v$(TAILWIND_VERSION)/tailwindcss-$$os-$$arch$$libc"; \
+	echo "fetching $$url"; \
+	curl -fsSL --retry 3 -o $@.part "$$url"; \
+	chmod +x $@.part; \
+	mv $@.part $@
+
+# The only target that writes client/public/app.css — which is committed, so
+# every other target and CI stay offline. Run it BEFORE `make`, not after: the
+# binary embeds client/public, so a stylesheet rebuilt after the go build is one
+# the server does not serve.
 #
 # Tailwind emits only the classes it can find. A class used for the first time,
 # or a new .js file under client/public, needs this target re-run; a class
 # assembled from a variable is never emitted at all.
-css:
-	@npm install --no-save --no-package-lock --prefix .howl/tailwind \
-		tailwindcss@4.1.18 @tailwindcss/cli@4.1.18 >/dev/null
+css: $(TAILWIND)
 	@SHADCN="$$(go list -mod=mod -m -f '{{.Dir}}' github.com/axadrn/shadcn-templ/v2)"; \
 	printf '%s\n' \
 		"@import \"$$SHADCN/assets/css/tw-animate.css\";" \
@@ -116,7 +145,7 @@ css:
 		'@source "../public/forge.js";' \
 		"@source \"$$SHADCN/components/**/*.templ\";" \
 		> client/styles/app.sources.css
-	.howl/tailwind/node_modules/.bin/tailwindcss -i client/styles/app.css -o client/public/app.css --minify
+	@$(TAILWIND) -i client/styles/app.css -o client/public/app.css --minify
 
 test:
 	go test ./...

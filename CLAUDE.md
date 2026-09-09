@@ -2,7 +2,7 @@
 
 Turns raw app screenshots into store-ready App Store and Google Play assets, in
 every language a project ships in. Go + [howl-go](../howl-go) + templ +
-shadcn-templ, in an OS-native window. No Node at run time, no Electron, no
+shadcn-templ, in an OS-native window. No Node anywhere, no Electron, no
 canvas in the browser.
 
 Read [`docs/howl-go.llms.txt`](docs/howl-go.llms.txt) before writing framework
@@ -55,7 +55,9 @@ reloads its content in place. The window must not be `howl dev`'s child — dev
 restarts what it builds, and that would kill and respawn the window on every
 save.
 
-`make css` is the only target that needs Node. `client/public/app.css` is a
+`make css` is the only target that touches the stylesheet, and it needs no
+Node: Tailwind v4 ships a standalone binary, which the target fetches into
+`.howl/` and pins. `client/public/app.css` is a
 committed build artifact; run `make css` **before** `make`, never after — the
 binary embeds `client/public`, so a stylesheet rebuilt after the go build is one
 the server does not serve.
