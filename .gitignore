@@ -15,5 +15,25 @@
 # Local data, when APPEDITIONS_HOME points here rather than at ~/.appeditions
 /.appeditions/
 
-# macOS Finder metadata.
+# Editor and per-machine files. settings.local.json is a contributor's own
+# permissions, not the project's — .claude/skills/ is committed on purpose, so
+# this cannot be a blanket ignore of the directory.
+.claude/settings.local.json
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS metadata, written into any directory the file manager has been shown.
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# Go test binaries and coverage profiles. `go test -c` and `-coverprofile`
+# write these next to the package; the renderer's PNG dump goes to $TMPDIR and
+# needs no rule.
+*.test
+*.out
