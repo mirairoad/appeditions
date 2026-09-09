@@ -86,33 +86,51 @@ a plain server on `:9010` if you would rather use a browser.
 | `make check` | The framework conventions, enforced |
 | `make css` | Rebuild the stylesheet (the only target that needs Node) |
 
-There are no prebuilt downloads yet, and nothing in the app checks for updates:
-`git pull && make run` is how you move to a newer version.
-
 ## Install it
 
-`make package` turns the built binary into something the OS shows an icon for.
-It does not build — `make desktop` does.
+If you only want the app, this builds it and cleans up after itself. Go and a C
+toolchain are needed for the build; the installed app needs neither, so the
+source is cloned to a temporary directory and deleted on the way out.
 
 ```bash
-make desktop && make package                 # dist/AppEditions.app
-make desktop && make package VERSION=1.1.0   # what Get Info shows
+curl -fsSL https://raw.githubusercontent.com/mirairoad/appeditions/main/install.sh | sh
 ```
 
-On Linux, package on Linux — `TARGET=linux`, never `GOOS=linux`, which make
-would export into every recipe and cross-compile the code generators with it.
-The desktop binary needs cgo and the platform's webview, so it cannot be
-cross-compiled at all.
+macOS gets `AppEditions.app` in `/Applications`, or in `~/Applications` when
+that is not writable; uninstalling is moving it to the Trash. Linux gets a
+binary, a `.desktop` entry and hicolor icons under `$HOME/.local`, and the
+uninstaller is kept at `~/.local/state/appeditions/uninstall.sh --uninstall`
+because the tree it was generated in does not survive the install.
+`libwebkit2gtk-4.1` is a runtime dependency there; the binary is not static.
+
+There is no auto-update and no prebuilt download. To move to a newer build:
 
 ```bash
-make desktop && make package TARGET=linux
-dist/appeditions/install.sh                  # into $HOME/.local
-PREFIX=/usr/local dist/appeditions/install.sh   # system-wide, as root
+curl -fsSL https://raw.githubusercontent.com/mirairoad/appeditions/main/update.sh | sh
 ```
 
-`install.sh` copies the binary, the `.desktop` entry and the hicolor icons into
-the XDG directories, and `install.sh --uninstall` takes them back out.
-`libwebkit2gtk-4.1` is a runtime dependency — the binary is not static.
+Because the source is not kept, an update is the same work as an install. All
+`update.sh` adds is one `git ls-remote` against the tip, so it can say "nothing
+to do" without cloning to find out. Both scripts read `REPO`, `REF`, `PREFIX`
+(Linux) and `APPDIR` (macOS); `FORCE=1` rebuilds when the check says you are
+current, and `KEEP_SRC=1` leaves the build tree behind.
+
+Your projects live in `~/.appeditions` and neither script touches them.
+
+### Packaging it yourself
+
+From a clone, `make package` writes the same trees to `dist/`.
+
+```bash
+make package                 # dist/AppEditions.app
+make package VERSION=1.1.0   # what Get Info shows
+make package TARGET=linux    # dist/appeditions/, on Linux
+```
+
+`TARGET=linux`, never `GOOS=linux`, which make would export into every recipe
+and cross-compile the code generators with it. The desktop binary needs cgo and
+the platform's webview, so it cannot be cross-compiled at all: build the Linux
+tree on Linux.
 
 Both trees are derived from one square 1024px PNG at
 `desktop/packaging/icon.png`, in pure Go, so there is no `iconutil` or `sips`
