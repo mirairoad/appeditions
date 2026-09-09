@@ -80,13 +80,20 @@ desktop: all
 
 # The desktop binary as something the OS shows an icon for: a .app on macOS, a
 # .desktop entry plus hicolor PNGs and an install.sh on Linux. Both are written
-# to dist/ from desktop/packaging/icon.png. Cross-package with `make package
-# GOOS=linux`, which works from either platform because nothing here shells out
-# to iconutil or sips.
+# to dist/ from desktop/packaging/icon.png, in pure Go, so there is no
+# iconutil/sips step.
+#
+# Select the target with `make package TARGET=linux`, never GOOS=linux: make
+# exports a command-line variable into the environment of every recipe, so GOOS
+# cross-compiles fsapis and the build dies trying to run it. The Linux tree has
+# to be packaged on Linux in any case — the desktop binary needs cgo and the
+# platform's webview, and cannot be cross-compiled at all. `howl package`
+# refuses a mismatch rather than writing a tree that installs, appears in the
+# launcher and does nothing when clicked.
 package: desktop
 	@go run github.com/mirairoad/howl-go/core/cmd/howl package \
 		-bin ./$(DESKTOP) -name "$(APP_NAME)" -id $(APP_ID) -version $(VERSION) \
-		$(if $(GOOS),-os $(GOOS))
+		$(if $(TARGET),-os $(TARGET))
 
 # The only target that needs Node, and the only one that writes
 # client/public/app.css — which is committed, so every other target and CI stay

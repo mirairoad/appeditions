@@ -67,7 +67,7 @@ what is still missing before the set can be uploaded.
 You need Go 1.25 and, for the stylesheet only, Node.
 
 ```bash
-git clone <this repo> && cd appeditions
+git clone https://github.com/mirairoad/appeditions.git && cd appeditions
 make run        # builds, then opens the window
 ```
 
@@ -85,6 +85,38 @@ a plain server on `:9010` if you would rather use a browser.
 | `make test` | Go tests, including the renderer's visual dump |
 | `make check` | The framework conventions, enforced |
 | `make css` | Rebuild the stylesheet (the only target that needs Node) |
+
+There are no prebuilt downloads yet, and nothing in the app checks for updates:
+`git pull && make run` is how you move to a newer version.
+
+## Install it
+
+`make package` turns the built binary into something the OS shows an icon for.
+It does not build — `make desktop` does.
+
+```bash
+make desktop && make package                 # dist/AppEditions.app
+make desktop && make package VERSION=1.1.0   # what Get Info shows
+```
+
+On Linux, package on Linux — `TARGET=linux`, never `GOOS=linux`, which make
+would export into every recipe and cross-compile the code generators with it.
+The desktop binary needs cgo and the platform's webview, so it cannot be
+cross-compiled at all.
+
+```bash
+make desktop && make package TARGET=linux
+dist/appeditions/install.sh                  # into $HOME/.local
+PREFIX=/usr/local dist/appeditions/install.sh   # system-wide, as root
+```
+
+`install.sh` copies the binary, the `.desktop` entry and the hicolor icons into
+the XDG directories, and `install.sh --uninstall` takes them back out.
+`libwebkit2gtk-4.1` is a runtime dependency — the binary is not static.
+
+Both trees are derived from one square 1024px PNG at
+`desktop/packaging/icon.png`, in pure Go, so there is no `iconutil` or `sips`
+step and nothing to install to get one.
 
 ## Where your files go
 
