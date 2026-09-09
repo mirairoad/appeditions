@@ -1,0 +1,55 @@
+package pages
+
+import (
+	"github.com/mirairoad/howl-go/core/router"
+
+	"github.com/mirairoad/appeditions/client/view"
+)
+
+// app.templ is the document shell: a reserved name, never a route, rendered
+// only for a cold request. A local navigation swaps `#outlet` and nothing else,
+// so anything in here that depended on the route would freeze on whichever page
+// was loaded first — which is why the navigation lives in layout.templ.
+templ App(title, head string) {
+	<!DOCTYPE html>
+	<html lang="en" class="style-nova">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<!-- Exactly one <title>. A page's own Head() supplies it; two of
+			     them and the browser keeps the first, so the page would lose. -->
+			<title>{ title }</title>
+			<link rel="stylesheet" href={ router.Asset(ctx, "app.css") }/>
+			@templ.JSONScript("howl-client", router.ClientConfig(ctx))
+			<script src={ router.Asset(ctx, "app.js") } type="module"></script>
+			<script src={ router.Asset(ctx, "forge.js") } type="module"></script>
+			<!--page-head-->
+			@templ.Raw(head)
+			<!--/page-head-->
+		</head>
+		<body class="min-h-screen bg-background font-sans text-foreground antialiased">
+			<main id="outlet" data-route={ router.Current(ctx) }>
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+templ NotFound(path string) {
+	<section class="mx-auto max-w-lg px-6 py-24 text-center">
+		<h1 class="text-2xl font-semibold">Nothing here</h1>
+		<p class="mt-2 text-sm text-muted-foreground">
+			No page at <code class="font-mono">{ path }</code>.
+		</p>
+		<a href="/" class="mt-6 inline-block text-sm text-primary underline underline-offset-4">Back to your projects</a>
+	</section>
+}
+
+// footerNote is the one place the data directory is named. A tool that writes
+// files somewhere should say where, on every page, without being asked.
+templ footerNote() {
+	{{ shell := view.ShellOf(ctx) }}
+	<p class="text-xs text-muted-foreground">
+		Files live in <code class="font-mono">{ shell.DataDir }</code>
+	</p>
+}

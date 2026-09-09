@@ -1,0 +1,60 @@
+package pages
+
+import (
+	"context"
+
+	"github.com/mirairoad/howl-go/core/router"
+
+	"github.com/mirairoad/appeditions/client/ui"
+)
+
+// The application chrome. It lives in a layout rather than in the shell
+// because it depends on the route: the active nav row is computed per render,
+// and markup in the shell is rendered once on a cold load and then frozen for
+// every local navigation after it.
+templ Layout() {
+	<div class="flex min-h-screen flex-col">
+		<header class="sticky top-0 z-20 flex h-14 items-center gap-6 border-b border-border/70 bg-background/80 px-5 backdrop-blur">
+			<a href="/" class="flex items-center gap-2 text-sm font-semibold tracking-tight">
+				@ui.Icon("look", "size-5 text-primary")
+				AppEditions
+			</a>
+			<nav class="flex items-center gap-1 text-sm">
+				@navLink("/", "Projects", "projects")
+				@navLink("/templates", "Templates", "templates")
+			</nav>
+			<div class="ml-auto">
+				@footerNote()
+			</div>
+		</header>
+		<div class="flex-1">
+			{ children... }
+		</div>
+	</div>
+}
+
+// navLink marks the current row with aria-current and styles from it, rather
+// than from a class computed at render time — one source of truth for "this is
+// where you are", and the one screen readers already read.
+templ navLink(path string, label string, icon string) {
+	<a
+		href={ templ.SafeURL(path) }
+		class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground aria-[current=page]:bg-secondary aria-[current=page]:text-foreground"
+		if isCurrent(ctx, path) {
+			aria-current="page"
+		}
+	>
+		@ui.Icon(icon, "size-4")
+		{ label }
+	</a>
+}
+
+// isCurrent uses router.Under for everything but the root, so /projects/abc
+// keeps the Projects row lit while `/` does not claim every page in the app.
+func isCurrent(ctx context.Context, path string) bool {
+	if path == "/" {
+		current := router.Current(ctx)
+		return current == "/" || len(current) >= 9 && current[:9] == "/projects"
+	}
+	return router.Under(ctx, path)
+}

@@ -1,0 +1,270 @@
+/* AppEditions's whole stylesheet: Tailwind v4 + shadcn-templ's style-nova.
+ *
+ * `make css` compiles this to client/public/app.css, which is committed, so
+ * `make`, `make dev` and `go test` stay Node-free. Re-run `make css` after
+ * using a Tailwind class no source used before — the compiler only emits what
+ * it finds in the @source globs, which the Make target writes into the
+ * generated app.sources.css beside this file. */
+@import "../../.howl/tailwind/node_modules/tailwindcss/index.css";
+@import "./app.sources.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--kit-font-sans);
+  --font-heading: var(--kit-font-sans);
+  --font-mono: var(--kit-font-mono);
+  --radius-sm: calc(var(--radius) * .6);
+  --radius-md: calc(var(--radius) * .8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-selection: var(--selection);
+  --color-selection-foreground: var(--selection-foreground);
+}
+
+/* Light chrome: a white page, a grey rail, and the store tiles as the only
+ * saturated things on screen.
+ *
+ * Every value that carries text is dark enough to read on white — the amber in
+ * particular, which at the lightness a dark theme wants it is about 3:1 against
+ * white and unreadable at the 12px the status line uses it at. */
+:root {
+  --kit-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --kit-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --radius: .625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(.22 .01 265);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  /* One accent, used for the current step and the primary action and nothing
+   * else. Colour is status here: green is done, amber needs attention, and if
+   * the accent appeared on ordinary chrome none of that would read. */
+  --primary: oklch(.55 .2 250);
+  --primary-foreground: oklch(.99 0 0);
+  --secondary: oklch(.965 .003 265);
+  --secondary-foreground: oklch(.28 .01 265);
+  --muted: oklch(.965 .003 265);
+  --muted-foreground: oklch(.52 .012 265);
+  --accent: oklch(.95 .02 250);
+  --accent-foreground: oklch(.30 .05 250);
+  --destructive: oklch(.55 .22 25);
+  --destructive-foreground: oklch(.99 0 0);
+  --success: oklch(.53 .13 158);
+  --success-foreground: oklch(.99 0 0);
+  --warning: oklch(.52 .13 70);
+  --warning-foreground: oklch(.99 0 0);
+  --border: oklch(.91 .004 265);
+  --input: oklch(.87 .005 265);
+  --ring: var(--primary);
+  /* The rail. Grey against the white page, which is the whole of the
+   * left-hand/right-hand split — there is no border doing that work. */
+  --sidebar: oklch(.967 .003 265);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --surface: oklch(.975 .003 265);
+  --surface-foreground: var(--foreground);
+  --selection: var(--primary);
+  --selection-foreground: var(--primary-foreground);
+  color-scheme: light;
+}
+
+/* AppEditions's own rules, deliberately outside every @layer: unlayered CSS
+ * outranks layered CSS, which is what lets an open-state rule beat the utility
+ * classes the same element carries for its closed state. */
+
+/* The edge under a preview tile. A screenshot set is often mostly white, and a
+ * white tile on a white page with no edge has no boundary at all — so on this
+ * theme the shadow is doing more work than it was on a dark one, and it is a
+ * hairline plus a soft drop rather than a heavy one. */
+.tile-shadow {
+  box-shadow: 0 0 0 1px oklch(0 0 0 / 7%), 0 1px 2px oklch(0 0 0 / 6%), 0 10px 24px -10px oklch(0 0 0 / 22%);
+}
+
+/* Drag-and-drop target. forge.js toggles `.dropping` on the drop zone; the
+ * ring is here rather than swapped as a class so the transition survives the
+ * dragenter/dragleave storm a nested element produces. */
+[data-drop] {
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+[data-drop].dropping {
+  background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+/* Steps and overlays are radios and checkboxes with sibling selectors — no
+ * JavaScript, keyboard-operable, and nothing to re-hydrate after a navigation.
+ * The panel is `display:none` when shut, which is also why anything expensive
+ * inside one has to be gated by whether it is open. */
+/* `+`, not `~`. The general sibling combinator matches EVERY following
+ * sibling, so on a page with several of these in one parent each unchecked box
+ * holds every panel after it shut and only the first one in the document can
+ * ever open. The pair is always adjacent, so adjacency is both exact and
+ * enough. */
+[data-panel]:not(:checked) + [data-panel-body] {
+  display: none;
+}
+
+/* The project rail, which is a drawer below lg and a column at lg and up.
+ *
+ * Only the closed state lives here, and only below the breakpoint: above it the
+ * rail is always visible and the checkbox means nothing. Written as media
+ * queries rather than Tailwind variants because it has to beat the utility
+ * classes the same element carries for its open state. */
+@media (max-width: 1023px) {
+  [data-rail]:not(:checked) + [data-rail-scrim],
+  [data-rail]:not(:checked) + [data-rail-scrim] + [data-rail-body] {
+    display: none;
+  }
+
+  body:has([data-rail]:checked) {
+    overflow: hidden;
+  }
+}
+
+@media (min-width: 1024px) {
+  [data-rail-scrim] {
+    display: none;
+  }
+}
+
+/* A modal is the same mechanism one layer up: a checkbox, a sibling selector,
+ * and no JavaScript deciding what is visible. Only the closed rule lives here —
+ * everything about how the open one looks is utility classes on the markup.
+ *
+ * Adjacent, for the reason above: the projects page renders one of these per
+ * card and they are all siblings. With `~` only the first modal in the
+ * document opened and every other one was held shut by the boxes before it. */
+[data-modal]:not(:checked) + [data-modal-body] {
+  display: none;
+}
+
+/* The page behind an open modal must not scroll, or a trackpad flick moves the
+ * list instead of the form. :has is what makes this possible without a class
+ * toggled from script. */
+body:has([data-modal]:checked) {
+  overflow: hidden;
+}
+
+/* A screen whose slot is still empty. The dashed edge is the whole message:
+ * this tile is laid out and waiting for a screenshot. */
+.slot-empty {
+  outline: 2px dashed color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+  outline-offset: -2px;
+}
+
+/* The busy state of an action that shells out to an agent. It can take thirty
+ * seconds, and a button that looks idle for thirty seconds gets pressed twice. */
+[data-busy="true"] {
+  pointer-events: none;
+  opacity: .6;
+  cursor: progress;
+}
+
+/* Colour chips. Both of these are inset hairlines rather than borders: a
+ * border is painted outside the box, so against a swatch of a near-identical
+ * colour the edge reads as a blur instead of a line — which is what made the
+ * pastel row look like a set of smudges. `color-mix` on currentColor would not
+ * work here, the swatch colour is an inline style. */
+.swatch {
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12);
+}
+
+/* A native colour input, wearing its own value. The platform draws this
+ * control, and WebKit's default is a bevelled button with a colour smear in
+ * the middle; stripping the chrome leaves the swatch, which is the only part
+ * that was ever informative. Clicking still opens the system picker. */
+.swatch-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  border-radius: .375rem;
+  background: transparent;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12);
+}
+
+.swatch-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.swatch-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: .375rem;
+}
+
+.swatch-input::-moz-color-swatch {
+  border: 0;
+  border-radius: .375rem;
+}
+
+/* The spinner a slow action puts in its own button. Not a utility class: it is
+ * written from forge.js, so Tailwind would never see it to emit it. */
+.spin {
+  display: inline-block;
+  width: .875rem;
+  height: .875rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 9999px;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+body.loading {
+  cursor: progress;
+}
+
+body.loading #outlet {
+  opacity: .55;
+  transition: opacity 120ms ease;
+}
+
+::selection {
+  background: var(--selection);
+  color: var(--selection-foreground);
+}

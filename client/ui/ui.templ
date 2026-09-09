@@ -1,0 +1,1178 @@
+// Package ui is the shared furniture: the icon wrapper, the flow's rail, the
+// preview tile, and the small controls the tune panel is built from.
+//
+// It is a leaf. Pages import it, it imports the model and the view types, and
+// nothing here reaches a database or an endpoint.
+package ui
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/axadrn/shadcn-templ/v2/components/badge"
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+// Icon renders a registry entry. Size it with the class — never with a width
+// attribute, or it stops following the type around it.
+templ Icon(name string, class string) {
+	{{ def, ok := icon(name) }}
+	if ok {
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			viewBox={ def.ViewBox }
+			fill={ def.Fill }
+			stroke={ def.Stroke }
+			stroke-width={ def.StrokeWidth }
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			class={ class }
+			aria-hidden="true"
+		>
+			@templ.Raw(def.Body)
+		</svg>
+	}
+}
+
+// A Step of the guided flow. The order is the order the decisions depend on:
+// the look shapes the slots, the slots take the screenshots, the copy sits on
+// them, and only then is there anything to fine-tune.
+type Step struct {
+	Slug  string
+	Label string
+	Icon  string
+}
+
+var Steps = []Step{
+	// Release is the root because it is what a submission *is* — the version,
+	// and the words the store shows beside the pictures. The pictures come
+	// after: you cannot caption a release you have not named.
+	{Slug: "", Label: "Release", Icon: "release"},
+	// Design, not Canvas: a canvas is one drawing surface, and this is a set of
+	// separate store tiles. Naming it after a single surface would set up
+	// exactly the mental model this application spends its time correcting —
+	// a panorama is two files, not one picture.
+	//
+	// The look and the captures are one step because they are one decision
+	// made by looking at one grid: the template lays out the slots and the
+	// screenshots go in them, and having those on two pages meant choosing a
+	// look, navigating, discovering it was wrong, and navigating back.
+	{Slug: "look", Label: "Design", Icon: "look"},
+	{Slug: "copy", Label: "Copy", Icon: "copy"},
+	{Slug: "tune", Label: "Fine-tune", Icon: "tune"},
+	{Slug: "export", Label: "Review & export", Icon: "export"},
+}
+
+func StepPath(projectID, slug string) string {
+	if slug == "" {
+		return "/projects/" + projectID
+	}
+	return "/projects/" + projectID + "/" + slug
+}
+
+// StepStatus is the colour a rail row takes. It is status and nothing else:
+// green means done, amber means it needs attention, and the accent is reserved
+// for the step you are on.
+type StepStatus string
+
+const (
+	StatusDone    StepStatus = "done"
+	StatusWarn    StepStatus = "warn"
+	StatusNeutral StepStatus = "neutral"
+)
+
+// Rail is the flow. Every step is navigation, never a gate: any of them is one
+// click away at any time, because someone who wants to fix a headline before
+// filling the last slot is not doing it wrong.
+templ Rail(e view.Editor, current string) {
+	<nav class="flex flex-col gap-1" aria-label="Steps">
+		for _, step := range Steps {
+			{{ status := stepStatus(e, step.Slug) }}
+			<a
+				href={ templ.SafeURL(StepPath(e.Project.ID, step.Slug)) }
+				class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-secondary/60 aria-[current=page]:bg-secondary aria-[current=page]:text-foreground text-muted-foreground"
+				if step.Slug == current {
+					aria-current="page"
+				}
+			>
+				<span
+					class={ "flex size-6 shrink-0 items-center justify-center rounded-md border",
+						templ.KV("border-success/40 bg-success/10 text-success", status == StatusDone),
+						templ.KV("border-warning/40 bg-warning/10 text-warning", status == StatusWarn),
+						templ.KV("border-border bg-secondary/50", status == StatusNeutral) }
+				>
+					if status == StatusDone {
+						@Icon("check", "size-3.5")
+					} else {
+						@Icon(step.Icon, "size-3.5")
+					}
+				</span>
+				<span class="min-w-0 truncate font-medium text-foreground">{ step.Label }</span>
+			</a>
+		}
+	</nav>
+}
+
+// stepStatus reads the same [model.Readiness] the footer and the review page
+// read. One reading, three places — two readings would eventually disagree
+// about whether the set can be exported.
+func stepStatus(e view.Editor, slug string) StepStatus {
+	r := e.Readiness
+	switch slug {
+	case "":
+		// The description is the field the store will not take empty, so it is
+		// what "this release is ready to describe" means. Amber once another
+		// language is short of it, because that is a submission that will be
+		// rejected rather than one that merely looks unfinished.
+		if !e.Version.Own(e.Project.BaseLocale).Written() {
+			return StatusNeutral
+		}
+		if len(e.Project.MissingListing()) > 0 {
+			return StatusWarn
+		}
+		return StatusDone
+	case "look":
+		// The look is chosen the moment a template is applied, so what this row
+		// reports is the part that is actually outstanding: slots with no
+		// picture in them.
+		switch {
+		case r.Total == 0:
+			return StatusNeutral
+		case r.MissingShots > 0:
+			return StatusWarn
+		default:
+			return StatusDone
+		}
+	case "copy":
+		switch {
+		case r.Total > 0 && r.MissingCopy == 0:
+			return StatusDone
+		case r.MissingCopy > 0:
+			return StatusWarn
+		}
+	case "export":
+		if r.CanExport {
+			return StatusDone
+		}
+	}
+	return StatusNeutral
+}
+
+// Tile is one screen's preview: an <img> pointed at the renderer.
+//
+// Three things about the tag, each of which cost something when it was wrong.
+// They are here rather than in a markup comment because this renders eleven
+// times on a page, and a paragraph shipped eleven times was 7 kB of a 188 kB
+// document.
+//
+// Rendered at twice the layout width: the width attribute is the CSS size and
+// the pixels behind it are 2x, because every display this runs on is Retina and
+// a tile drawn at its CSS width is upscaled by the browser — which is what made
+// the screenshots look soft.
+//
+// width AND height, both. Without the second the browser reserves no space for
+// a tile it has not painted. #outlet is replaced wholesale on every re-render,
+// so for one frame the page is as short as its text, and howl restores the
+// scroll with window.scrollTo — which the browser clamps to the bottom of that
+// short document. Every change jumped the page to the top.
+//
+// `v` names the drawing, so an unchanged tile is a byte-identical URL the cache
+// answers without a request. Without it every tile blanked for one revalidation
+// on every re-render.
+//
+// There is no canvas anywhere in this application. The preview is a PNG the
+// export code produced at a smaller size, which is the strongest form of "what
+// you see is what ships" available — not a second implementation kept in step,
+// but the same call.
+//
+// It takes the whole editor rather than the three values it needs, because the
+// three travel together — project, language, target size — and a call site
+// that forgot the size would silently render at the wrong aspect ratio.
+//
+// One screen, one tile, one file. A panorama's halves are two screens in the
+// set, each drawing its own slice of the composition, so nothing here has to
+// know that a drawing can be wider than a tile.
+templ Tile(e view.Editor, screen model.Screen, width int, class string) {
+	<img
+		src={ fmt.Sprintf("/api/preview/%s/%s?locale=%s&size=%s&w=%d&v=%s", e.Project.ID, screen.ID, e.Locale, e.Size.ID, width*2,
+			model.PreviewTag(e.Project, screen, screen.Text(e.Locale, e.Project.BaseLocale), width*2)) }
+		width={ strconv.Itoa(width) }
+		height={ strconv.Itoa(width * e.Size.H / e.Size.W) }
+		alt=""
+		loading="lazy"
+		data-tile={ screen.ID }
+		class={ "block h-auto w-full overflow-hidden rounded-xl tile-shadow", class,
+			templ.KV("slot-empty", !screen.Filled()) }
+	/>
+}
+
+// PickPictureID names one screen's picture picker.
+func PickPictureID(screenID string) string { return "pick-" + screenID }
+
+// PickPicture chooses which original a tile draws, from the ones the project
+// already holds.
+//
+// It does not open a file dialog and it does not upload. Media is the one way
+// a picture enters a project, and every assignment after that is a reference
+// to it — replacing a tile by uploading again made a second copy of a file
+// already on disk and left the originals list full of duplicates nobody could
+// tell apart. The way to use a picture that is not here yet is to add it to
+// Media, which is one button away and says so.
+//
+// Every original is offered, including ones already in the set: the same
+// screenshot legitimately appears twice — a panorama's neighbour draws it, and
+// a tile can be repeated at another store size — and hiding used ones would
+// make that impossible while explaining nothing.
+templ PickPicture(e view.Editor, screen model.Screen) {
+	@Modal(PickPictureID(screen.ID), pickTitle(screen), pickHint(e, screen), pickActions(e, screen)) {
+		if len(e.Assets) == 0 {
+			@Empty("No pictures yet", "Add some with Choose files, and they land here for every tile to use.")
+		} else {
+			<ul class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+				for _, a := range e.Assets {
+					{{ chosen := a.ID == pictureOf(e, screen) }}
+					<li>
+						<button
+							type="button"
+							class={ "block w-full overflow-hidden rounded-lg border-2 text-left transition-colors",
+								templ.KV("border-primary", chosen),
+								templ.KV("border-transparent hover:border-primary/50", !chosen) }
+							data-action={ "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/picture" }
+							data-body={ `{"asset_id":"` + a.ID + `"}` }
+							aria-pressed={ strconv.FormatBool(chosen) }
+						>
+							<img
+								src={ "/api/assets/" + a.ID }
+								alt=""
+								loading="lazy"
+								width="120"
+								height="208"
+								class="block h-auto w-full bg-secondary/40 object-cover"
+							/>
+							<span class="block truncate px-1.5 py-1 text-[11px] text-muted-foreground" title={ a.Name }>
+								{ a.Name }
+							</span>
+						</button>
+					</li>
+				}
+			</ul>
+		}
+	}
+}
+
+templ pickActions(e view.Editor, screen model.Screen) {
+	<div class="flex items-center gap-2">
+		if pictureOf(e, screen) != "" {
+			@button.Button(button.Props{
+				Variant: button.VariantOutline,
+				Size:    button.SizeSm,
+				Attributes: templ.Attributes{
+					"data-action": "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/picture",
+					"data-body":   `{"asset_id":""}`,
+				},
+			}) {
+				Empty this slot
+			}
+		}
+		<span class="flex-1"></span>
+		<span class="text-xs text-muted-foreground">Nothing here? Add it with Choose files.</span>
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeSm, Attributes: PanelToggle(PickPictureID(screen.ID))}) {
+			Close
+		}
+	</div>
+}
+
+// pictureOf is the original this tile draws, resolved through the lead: a
+// panorama's halves share one picture, so the right tile shows the left tile's
+// choice as chosen — which is true, and the alternative is a picker that says
+// nothing is selected on half the cards.
+func pictureOf(e view.Editor, screen model.Screen) string {
+	if lead, ok := e.Project.Lead(screen.ID); ok {
+		return lead.AssetID
+	}
+	return screen.AssetID
+}
+
+func pickTitle(screen model.Screen) string {
+	if screen.Filled() {
+		return "Replace the picture"
+	}
+	return "Fill this slot"
+}
+
+func pickHint(e view.Editor, screen model.Screen) string {
+	if screen.Follows() || spans(e, screen) {
+		return "This tile is half of a two-tile composition — one picture, cut in two, so this sets both."
+	}
+	return "From the pictures this project already holds."
+}
+
+// MediaID names the panel listing a project's uploaded originals.
+const MediaID = "media"
+
+// Media is everything the project has been given, and the one thing that list
+// has to be able to do: throw a picture away.
+//
+// A modal rather than a section on the page. It is reference material — what
+// is here, what is spare — and the page is about the set; a permanent list of
+// every file ever uploaded pushed the tiles below the fold and answered a
+// question nobody was asking most of the time.
+//
+// An original in use cannot be deleted, and the row says which ones those are
+// rather than letting the click fail. The server refuses too — the rule lives
+// in the store, because this panel is not the only way in.
+templ Media(e view.Editor) {
+	@Modal(MediaID, "Media", mediaHint(e), mediaActions(e)) {
+		if len(e.Assets) == 0 {
+			@Empty("Nothing uploaded yet", "Choose files on this step and the originals land here, kept exactly as they arrived.")
+		} else {
+			<ul class="divide-y divide-border/70 rounded-lg border border-border/70">
+				for _, a := range e.Assets {
+					<li class="flex items-center gap-3 px-3 py-2.5">
+						<img
+							src={ "/api/assets/" + a.ID }
+							alt=""
+							loading="lazy"
+							width="32"
+							height="56"
+							class="h-14 w-8 shrink-0 rounded border border-border/70 object-cover"
+						/>
+						<span class="min-w-0 flex-1">
+							<span class="block truncate text-sm">{ a.Name }</span>
+							<span class="block text-xs text-muted-foreground">
+								{ strconv.Itoa(a.Width) }×{ strconv.Itoa(a.Height) }
+								if a.Use != "" {
+									{ " · " + a.Use }
+								} else {
+									{ " · unused" }
+								}
+							</span>
+						</span>
+						if a.Used {
+							<span class="shrink-0 text-[11px] text-muted-foreground/70">{ inUseNote(a) }</span>
+						} else {
+							<button
+								type="button"
+								class="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+								aria-label={ "Delete " + a.Name }
+								data-action={ "/api/projects/" + e.Project.ID + "/assets/" + a.ID + "/delete" }
+								data-body="{}"
+							>
+								@Icon("trash", "size-4")
+							</button>
+						}
+					</li>
+				}
+			</ul>
+		}
+	}
+}
+
+templ mediaActions(e view.Editor) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{Size: button.SizeSm, Attributes: Picks("shot-input")}) {
+			@Icon("upload", "size-4")
+			Add files
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeSm, Attributes: PanelToggle(MediaID)}) {
+			Close
+		}
+	</div>
+}
+
+// inUseNote is what stands where the delete button would be. It names the way
+// out rather than saying "no": the icon is changed in the project settings and
+// a screen's picture on this step, and a row that only says "in use" leaves
+// the author looking for the button that is not there.
+func inUseNote(a view.Asset) string {
+	if a.Use == "the app icon" {
+		return "change it in project settings"
+	}
+	return "remove the screen first"
+}
+
+func mediaHint(e view.Editor) string {
+	if len(e.Assets) == 0 {
+		return ""
+	}
+	var unused int
+	for _, a := range e.Assets {
+		if !a.Used {
+			unused++
+		}
+	}
+	if unused == 0 {
+		return Count2(len(e.Assets), "original") + ", all of them in the set."
+	}
+	return Count2(len(e.Assets), "original") + ", " + strconv.Itoa(unused) + " not used by any screen."
+}
+
+// RemoveScreenID names one screen's confirm modal. Exported because the button
+// and the modal are rendered in different places — the button in the card, the
+// modal after the list, because position:fixed resolves against the nearest
+// transformed ancestor.
+func RemoveScreenID(screenID string) string { return "remove-" + screenID }
+
+// RemoveScreenButton opens the confirmation. It does not carry data-confirm:
+// window.confirm is a system alert that says "localhost:9010 says" in a
+// browser and nothing at all in the window, and it cannot explain that
+// removing half of a panorama removes both halves — which is the only part of
+// this worth asking about.
+templ RemoveScreenButton(screen model.Screen, class string) {
+	<button
+		type="button"
+		class={ "rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive", class }
+		aria-label="Remove screen"
+		data-panel-toggle={ RemoveScreenID(screen.ID) }
+	>
+		@Icon("trash", "size-3.5")
+	</button>
+}
+
+// RemoveScreenModal is the confirmation, shared by the Look step and the
+// Screenshots step. One implementation, because the two pages ask the same
+// question and a second copy would eventually answer it differently — about
+// panoramas above all, where the honest answer is "both halves go".
+//
+// Render it after the list, never inside a row.
+templ RemoveScreenModal(e view.Editor, index int, screen model.Screen) {
+	@Modal(RemoveScreenID(screen.ID), "Remove screen "+strconv.Itoa(index+1)+"?", "", removeScreenActions(e.Project.ID, screen)) {
+		<div class="space-y-3 text-sm">
+			if screen.Filled() {
+				<p>
+					The picture goes back to being an unused original — <code class="font-mono text-foreground">{ ScreenName(e, screen) }</code> stays on disk and can be dropped in again.
+				</p>
+			} else {
+				<p>This slot has no picture in it yet.</p>
+			}
+			if screen.Follows() || spans(e, screen) {
+				<p class="text-muted-foreground">
+					This is one half of a two-tile composition, and both halves go. They are one drawing, cut where the export cuts.
+				</p>
+			}
+		</div>
+	}
+}
+
+templ removeScreenActions(projectID string, screen model.Screen) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{
+			Variant: button.VariantDestructive,
+			Size:    button.SizeSm,
+			Attributes: templ.Attributes{
+				"data-action": "/api/projects/" + projectID + "/screens/" + screen.ID + "/remove",
+				"data-body":   "{}",
+			},
+		}) {
+			@Icon("trash", "size-4")
+			Remove
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeSm, Attributes: PanelToggle(RemoveScreenID(screen.ID))}) {
+			Cancel
+		}
+	</div>
+}
+
+// spans reports whether this screen owns a composition wider than one tile,
+// which is the other way to be half of a panorama: the lead.
+func spans(e view.Editor, screen model.Screen) bool {
+	for _, s := range e.Project.Screens() {
+		if s.Of == screen.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// ScreenName is the capture's own file name. Falls back to a phrase rather than
+// an empty string: a slot laid out by a template has no picture yet and
+// therefore no name, and a blank caption reads as a bug.
+func ScreenName(e view.Editor, screen model.Screen) string {
+	lead := screen
+	if l, ok := e.Project.Lead(screen.ID); ok {
+		lead = *l
+	}
+	for _, a := range e.Assets {
+		if a.ID == lead.AssetID {
+			return a.Name
+		}
+	}
+	return "no picture"
+}
+
+// PanelToggle wires a button to a disclosure panel. The panel's open state is a
+// checkbox and a CSS sibling selector, so nothing here decides what is visible
+// — this only flips the checkbox, because a <button> inside a <label> does not
+// activate the label and the panel would never open.
+func PanelToggle(id string) templ.Attributes {
+	return templ.Attributes{"data-panel-toggle": id, "aria-controls": id, "aria-expanded": "false"}
+}
+
+// Picks opens a file dialog from a real button, for the same reason: the
+// <input type=file> stays hidden and keeps its own id.
+func Picks(inputID string) templ.Attributes {
+	return templ.Attributes{"data-picks": inputID}
+}
+
+// Modal is an overlay built the way every other disclosure here is built: a
+// checkbox holds the state and a sibling selector shows the body. No
+// JavaScript decides what is visible, it is keyboard-operable, and there is
+// nothing to re-hydrate after a navigation.
+//
+// Open it with a button carrying [PanelToggle] with the same id. The backdrop
+// is a <label> for the same checkbox, so clicking outside closes it; forge.js
+// adds Escape, which is the one part a label cannot express. No
+// backdrop-filter on the backdrop: it would repaint the whole viewport on
+// every scroll of the panel above, and this renders once per modal.
+//
+// The height is the fiddly part. The dialog is a flex column capped at the
+// viewport, so a form taller than the window scrolls *inside* it with the title
+// and the actions staying put — rather than the card growing past the bottom of
+// the screen and taking its own submit button with it. min-h-0 on the scrolling
+// middle is what makes that work: without it a flex child refuses to shrink
+// below its content and the cap does nothing.
+//
+// The width is four fifths of the window, capped at 1152px so it does not
+// sprawl on an external display, and the full width below the `sm` breakpoint
+// where four fifths would be too narrow to put two fields side by side.
+//
+// footer is optional; pass nil for a modal that is only content. Its buttons
+// sit outside the form, so they carry form="<the form's id>" to submit it.
+templ Modal(id string, title string, hint string, footer templ.Component) {
+	<input type="checkbox" data-modal id={ id } class="peer sr-only"/>
+	<div data-modal-body class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+		<label for={ id } class="absolute inset-0 bg-black/40" aria-label="Close"></label>
+		<div
+			role="dialog"
+			aria-modal="true"
+			aria-label={ title }
+			class="relative flex max-h-full w-full flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-2xl sm:w-4/5 sm:max-w-6xl"
+		>
+			<div class="flex shrink-0 items-start gap-4 border-b border-border/70 px-6 py-5">
+				<div class="min-w-0 flex-1">
+					<h2 class="text-lg font-semibold tracking-tight">{ title }</h2>
+					if hint != "" {
+						<p class="mt-1 text-sm text-muted-foreground">{ hint }</p>
+					}
+				</div>
+				<button
+					type="button"
+					class="-mr-1 -mt-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+					aria-label="Close"
+					data-panel-toggle={ id }
+				>
+					@Icon("close", "size-4")
+				</button>
+			</div>
+			<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">
+				{ children... }
+			</div>
+			if footer != nil {
+				<div class="shrink-0 border-t border-border/70 bg-card px-6 py-4">
+					@footer
+				</div>
+			}
+		</div>
+	</div>
+}
+
+// ProjectIcon is the app's icon, or a lettered tile when there is none. It is
+// the project's identity in a grid of cards: everyone recognises their own
+// icon faster than they read a name.
+//
+// The radius is a percentage rather than a fixed value so the same component
+// looks right at 32px in the rail and 48px on a card.
+templ ProjectIcon(p model.Project, class string) {
+	if p.IconAssetID != "" {
+		<img
+			src={ "/api/projects/" + p.ID + "/icon?v=" + p.IconAssetID }
+			alt=""
+			loading="lazy"
+			class={ "shrink-0 rounded-[22%] border border-border/70 object-cover", class }
+		/>
+	} else {
+		<span
+			class={ "flex shrink-0 items-center justify-center rounded-[22%] border border-dashed border-border bg-secondary/70 font-semibold uppercase text-muted-foreground", class }
+			aria-hidden="true"
+		>
+			{ Initial(p.Name) }
+		</span>
+	}
+}
+
+// Initial is the first letter of a name, for the placeholder tile.
+func Initial(name string) string {
+	for _, r := range name {
+		return string(r)
+	}
+	return "?"
+}
+
+// frameFor is the device shown against a store slot: the one the project chose
+// for it, or the frame that belongs in that slot for one it does not ship yet.
+func frameFor(t model.Target, size model.ExportSize, chosen bool) string {
+	if chosen && t.DeviceID != "" {
+		return t.DeviceID
+	}
+	return size.Device
+}
+
+// ProjectSettingsID is the modal's id for a project. Open it from anywhere
+// with a button carrying PanelToggle(ProjectSettingsID(p.ID)).
+func ProjectSettingsID(projectID string) string { return "settings-" + projectID }
+
+// ProjectSettings is everything about a project that is not a screen: its
+// name, its icon, what it does, and the languages it ships in.
+//
+// The languages live here and nowhere else. They used to be edited from the
+// Copy step, which put "which languages exist" next to "what they say" — two
+// different decisions at two different rhythms, and the one that adds a folder
+// to every export is not the one you want next to a text field you are
+// editing.
+//
+// It saves in one multipart request because the icon is a file: uploading it
+// separately would re-render the page between the two writes and discard
+// whatever had been typed.
+templ ProjectSettings(p model.Project, locales []model.Locale, sizes []model.ExportSize, devices []model.Device) {
+	@Modal(ProjectSettingsID(p.ID), "Project settings", "The name and icon are how you find it again; the description is what the copy assistant is grounded in.", projectSettingsActions(p.ID)) {
+		<form id={ "settings-form-" + p.ID } data-form-multipart={ "/api/projects/" + p.ID + "/edit" } class="space-y-6">
+			<div class="flex items-start gap-4">
+				@ProjectIcon(p, "size-16 text-2xl")
+				<div class="min-w-0 flex-1 space-y-1.5">
+					<span class="block text-sm font-medium">App icon</span>
+					<input
+						id={ "icon-" + p.ID }
+						type="file"
+						name="icon"
+						accept="image/*"
+						class="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-md file:border file:border-border file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:text-foreground hover:file:bg-secondary/70"
+					/>
+					<span class="block text-xs text-muted-foreground">
+						A square image. Stored with the project's screenshots and never modified.
+					</span>
+					if p.IconAssetID != "" {
+						<label class="mt-1 flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+							<input type="checkbox" name="clear_icon" value="1" class="size-3.5 accent-current"/>
+							Remove the current icon
+						</label>
+					}
+				</div>
+			</div>
+			<div class="grid gap-4 sm:grid-cols-2">
+				<label class="block space-y-1.5">
+					<span class="text-sm font-medium">App name</span>
+					@input.Input(input.Props{ID: "settings-name-" + p.ID, Name: "name", Value: p.Name, Required: true})
+					<span class="block text-xs text-muted-foreground">
+						Only the label. The folder your files are in was named at creation and does not move: <code class="font-mono">{ p.Slug }</code>
+					</span>
+				</label>
+				<label class="block space-y-1.5">
+					<span class="text-sm font-medium">What does the app do?</span>
+					@textarea.Textarea(textarea.Props{ID: "settings-description-" + p.ID, Name: "description", Rows: 3, Value: p.Description})
+				</label>
+			</div>
+			<fieldset class="space-y-2">
+				<legend class="text-sm font-medium">Languages</legend>
+				<p class="text-xs text-muted-foreground">
+					Each one gets its own export folder, named the way the store expects. Unticking a language deletes the copy written in it; the language you write in cannot be removed.
+				</p>
+				<!-- A checkbox group sends nothing at all when every box is
+				     unticked, which is indistinguishable from a form that never
+				     had the field. This marker is how the handler tells "the
+				     author cleared them" from "this request is not about
+				     languages". -->
+				<input type="hidden" name="locales_submitted" value="1"/>
+				<div class="flex flex-wrap gap-1.5 pt-1">
+					for _, l := range locales {
+						{{ on := p.HasLocale(l.Tag) }}
+						{{ base := l.Tag == p.BaseLocale }}
+						<label class={ "cursor-pointer", templ.KV("cursor-default", base) }>
+							<input
+								type="checkbox"
+								name="locales"
+								value={ l.Tag }
+								checked?={ on }
+								disabled?={ base }
+								class="peer sr-only"
+							/>
+							<span class="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-70">
+								{ l.Label }
+								if base {
+									<span class="text-[10px] uppercase tracking-wide">base</span>
+								}
+							</span>
+						</label>
+					}
+				</div>
+			</fieldset>
+		</form>
+	}
+}
+
+templ projectSettingsActions(id string) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{Type: button.TypeSubmit, Attributes: templ.Attributes{"form": "settings-form-" + id}}) {
+			Save changes
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Attributes: PanelToggle(ProjectSettingsID(id))}) {
+			Cancel
+		}
+	</div>
+}
+
+// VersionSelect switches the submission the whole editor is looking at.
+//
+// It sits above the store slot and the language because it contains them: a
+// version has its own screens, and its listing has one entry per language. The
+// other two say how this version is being *viewed*; this one says which one it
+// is.
+//
+// A link rather than a control, like the other two — the version is part of
+// which page you are on, so a reload and the back button keep it.
+templ VersionSelect(e view.Editor, path string) {
+	<label class="block space-y-1.5">
+		<span class="text-[11px] text-muted-foreground">Version</span>
+		<select
+			class="cn-native-select w-full text-xs font-medium"
+			aria-label="Version"
+			data-goto={ path + "?size=" + e.Size.ID + "&locale=" + e.Locale + "&version=" }
+		>
+			for _, v := range e.Project.Versions {
+				<option value={ v.ID } selected?={ v.ID == e.Project.VersionID }>
+					{ v.Name }
+					{ " · " + count(len(v.Screens), "screen") + " · " + count(len(v.Targets), "device") }
+				</option>
+			}
+		</select>
+	</label>
+}
+
+// Devices is which store slots one release ships to.
+//
+// Per version, not per project: a point release that skipped the iPad build is
+// an ordinary thing to ship, and a project with one list would have the export
+// write a directory for a device this version has nothing to say about.
+//
+// The frame comes with the slot. Ticking "iPad 13-inch" gets an iPad body
+// rather than whatever the last size was using, because presets.Sizes carries
+// the frame that belongs in each slot — which is what makes adding a target
+// change no drawing code.
+templ Devices(p model.Project, sizes []model.ExportSize, devices []model.Device) {
+	<!-- No "submitted" marker here, unlike the languages group in the settings
+	     modal. That one is multipart, where an empty checkbox group is
+	     indistinguishable from a form that never carried the field; this one
+	     goes through serialize(), which seeds every repeated group to [] before
+	     reading it, so "none ticked" arrives as an empty list and says so.
+	     A marker would arrive as a field the typed endpoint never declared,
+	     which is a 400 with the whole save lost. -->
+	<div class="space-y-1.5">
+		for _, size := range sizes {
+			{{ target, on := p.TargetOf(size.ID) }}
+			<div class="flex flex-wrap items-center gap-2">
+				<label class="cursor-pointer">
+					<input
+						type="checkbox"
+						name="sizes"
+						value={ size.ID }
+						checked?={ on }
+						class="peer sr-only"
+					/>
+					<span class="inline-flex w-52 items-center justify-between gap-2 rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+						<span class="truncate">{ size.Label }</span>
+						<span class="shrink-0 text-[10px] text-muted-foreground/70">{ strconv.Itoa(size.W) }×{ strconv.Itoa(size.H) }</span>
+					</span>
+				</label>
+				<!-- data-list, because several selects share this name and a
+				     repeated select is not a list by shape the way a repeated
+				     checkbox is. The value carries both halves so the endpoint
+				     needs no dynamic keys. -->
+				<select
+					name="frames"
+					data-list
+					class={ "cn-native-select w-44 text-xs", templ.KV("opacity-50", !on) }
+					aria-label={ size.Label + " frame" }
+				>
+					for _, d := range devices {
+						<option value={ size.ID + ":" + d.ID } selected?={ frameFor(target, size, on) == d.ID }>{ d.Label }</option>
+					}
+				</select>
+			</div>
+		}
+	</div>
+}
+
+// DeviceSummary names the slots a version ships to, for a list of them.
+func DeviceSummary(v model.Version, sizes []model.ExportSize) string {
+	if len(v.Targets) == 0 {
+		return "no devices"
+	}
+	labels := make([]string, 0, len(v.Targets))
+	for _, t := range v.Targets {
+		for _, s := range sizes {
+			if s.ID == t.SizeID {
+				labels = append(labels, s.Label)
+				break
+			}
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+// SizeTabs switches the store slot the editor is drawn at. A link, not a
+// control, for the same reason the language is: it is part of which page you
+// are on, and a reload, a bookmark and the back button all have to keep it.
+//
+// Drawn only when the project ships to more than one — a row of tabs with one
+// tab in it is chrome that says nothing.
+templ SizeTabs(e view.Editor, path string) {
+	if len(e.Project.Targets()) > 1 {
+		<select
+			class="cn-native-select w-full text-xs"
+			aria-label="Device"
+			data-goto={ path + "?locale=" + e.Locale + "&size=" }
+		>
+			for _, t := range e.Project.Targets() {
+				{{ size := e.SizeOf(t.SizeID) }}
+				<option value={ t.SizeID } selected?={ t.SizeID == e.Size.ID }>
+					{ size.Label } — { strconv.Itoa(size.W) }×{ strconv.Itoa(size.H) }
+				</option>
+			}
+		</select>
+	}
+}
+
+// LocaleTabs switches the language the whole editor is looked at in. It is a
+// link rather than a control because the language is part of what page you are
+// on: a reload, a bookmark and the back button all have to keep it.
+templ LocaleTabs(e view.Editor, path string) {
+	<div class="flex flex-wrap items-center gap-1">
+		for _, tag := range e.Project.Locales {
+			{{ l := localeOf(e.Locales, tag) }}
+			{{ missing := len(e.Project.MissingCopy(tag)) }}
+			<a
+				href={ templ.SafeURL(path + "?locale=" + tag) }
+				class="inline-flex items-center gap-1.5 rounded-md border border-transparent px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 aria-[current=true]:border-border aria-[current=true]:bg-secondary aria-[current=true]:text-foreground"
+				if tag == e.Locale {
+					aria-current="true"
+				}
+			>
+				{ l.Label }
+				if tag == e.Project.BaseLocale {
+					<span class="text-[10px] uppercase tracking-wide text-muted-foreground/70">base</span>
+				} else if missing > 0 {
+					<span class="rounded bg-warning/15 px-1 text-[10px] font-medium text-warning">{ strconv.Itoa(missing) }</span>
+				}
+			</a>
+		}
+	</div>
+}
+
+// LocaleSelect is the language, in the rail, under the store slot — the same
+// control in the same place asking the same kind of question. It replaced a row
+// of tabs at the top of the Copy step: the language is not a property of that
+// step, every step is drawn in one, and a switcher that only existed on one
+// page read as a different setting from the size selector two panels away.
+//
+// Drawn only when there is a choice. One language is not a decision.
+templ LocaleSelect(e view.Editor, path string) {
+	if len(e.Project.Locales) > 1 {
+		<label class="block space-y-1.5">
+			<span class="text-[11px] text-muted-foreground">Language</span>
+			<select
+				class="cn-native-select w-full text-xs"
+				aria-label="Language"
+				data-goto={ path + "?size=" + e.Size.ID + "&locale=" }
+			>
+				for _, tag := range e.Project.Locales {
+					{{ l := localeOf(e.Locales, tag) }}
+					{{ missing := len(e.Project.MissingCopy(tag)) }}
+					<option value={ tag } selected?={ tag == e.Locale }>
+						{ l.Label }
+						if tag == e.Project.BaseLocale {
+							{ " (base)" }
+						} else if missing > 0 {
+							{ " — " + strconv.Itoa(missing) + " to write" }
+						}
+					</option>
+				}
+			</select>
+		</label>
+	}
+}
+
+func localeOf(all []model.Locale, tag string) model.Locale {
+	for _, l := range all {
+		if l.Tag == tag {
+			return l
+		}
+	}
+	return model.Locale{Tag: tag, Label: tag}
+}
+
+// Section is a titled block of controls. The optional action sits on the
+// right of the heading, which is where a "reset this section" belongs.
+templ Section(title string, hint string) {
+	<section class="space-y-3">
+		<header class="space-y-0.5">
+			<h2 class="text-sm font-semibold text-foreground">{ title }</h2>
+			if hint != "" {
+				<p class="text-xs text-muted-foreground">{ hint }</p>
+			}
+		</header>
+		{ children... }
+	</section>
+}
+
+// Empty is the nothing-here state: what this place is for, and the one action
+// that fills it.
+templ Empty(title string, body string) {
+	<div class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/80 px-6 py-14 text-center">
+		<p class="text-sm font-medium text-foreground">{ title }</p>
+		if body != "" {
+			<p class="max-w-sm text-sm text-muted-foreground">{ body }</p>
+		}
+		{ children... }
+	</div>
+}
+
+// Swatch is one background choice. A radio, so the picker is keyboard-operable
+// and needs no JavaScript to show which one is current.
+templ Swatch(name string, value string, style string, selected bool, label string) {
+	<label class="relative block cursor-pointer" title={ label }>
+		<input
+			type="radio"
+			name={ name }
+			value={ value }
+			checked?={ selected }
+			class="peer sr-only"
+			data-patch
+		/>
+		<!-- The hairline is inset rather than a border: a border sits outside
+		     the painted box and reads as a blurred edge against a swatch of a
+		     similar colour, which is what made a row of pastels look soft. -->
+		<span
+			class="swatch block size-7 rounded-md ring-offset-2 ring-offset-secondary/40 transition-shadow peer-checked:ring-2 peer-checked:ring-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+			style={ style }
+		></span>
+	</label>
+}
+
+// ColorField is a colour picker that does not eat the panel.
+//
+// A bare <input type="color"> is drawn by the platform, and WebKit draws it as
+// a chunky bevelled button: at `w-full` it was the largest thing in the panel
+// and the least important. Here the input is a 28px square wearing the swatch,
+// with the hex beside it and room on the right for an action — a control the
+// size of the decision it makes.
+//
+// The native picker is still what opens, because a hand-written colour wheel
+// would be worse than the operating system's and would not remember the
+// author's recent colours.
+templ ColorField(name string, label string, value string) {
+	<div class="flex items-center gap-2.5">
+		<label class="relative shrink-0 cursor-pointer" title={ label }>
+			<input
+				type="color"
+				name={ name }
+				value={ value }
+				class="swatch-input size-7"
+				data-patch
+			/>
+		</label>
+		<span class="min-w-0 flex-1">
+			<span class="block text-xs text-muted-foreground">{ label }</span>
+			<span class="block font-mono text-[11px] uppercase text-foreground/70">{ value }</span>
+		</span>
+		{ children... }
+	</div>
+}
+
+// ColorChip is the same input with no label, for a row of them.
+templ ColorChip(name string, value string, label string) {
+	<label class="cursor-pointer" title={ label + " — " + value }>
+		<input type="color" name={ name } value={ value } class="swatch-input size-7" data-patch/>
+	</label>
+}
+
+// Field is a labelled control with a character count, for the store's fields.
+//
+// The count is not decoration: every one of these has a limit App Store
+// Connect enforces at submission, and finding out that a description is 60
+// characters over after the upload is the worst possible time. maxlength stops
+// the typing; this says how much room is left before it does.
+//
+// max of 0 means uncounted — a URL has a limit nobody is going to reach by
+// typing.
+templ Field(label string, name string, max int, used int) {
+	<label class="block space-y-1.5">
+		<span class="flex items-baseline justify-between gap-2">
+			<span class="text-xs font-medium text-foreground">{ label }</span>
+			if max > 0 {
+				<span class="font-mono text-[11px] text-muted-foreground" data-count-for={ name }>
+					{ strconv.Itoa(used) }/{ strconv.Itoa(max) }
+				</span>
+			}
+		</span>
+		{ children... }
+	</label>
+}
+
+// Counted wires a control to its counter and caps what can be typed. Two
+// attributes rather than one, because maxlength is the browser doing the work
+// and data-count is only what says so.
+func Counted(name string, max int) templ.Attributes {
+	return templ.Attributes{"maxlength": strconv.Itoa(max), "data-count": name}
+}
+
+// Range is a slider that reports its value. `data-patch` is what forge.js
+// binds to: one delegated listener on the document, so a control that arrives
+// with a re-rendered outlet works without being wired up again.
+templ Range(name string, label string, value float64, min float64, max float64, step float64, suffix string) {
+	<label class="block space-y-1.5">
+		<span class="flex items-center justify-between text-xs">
+			<span class="text-muted-foreground">{ label }</span>
+			<span class="font-mono text-[11px] text-foreground" data-range-value={ name }>{ format(value) }{ suffix }</span>
+		</span>
+		<input
+			type="range"
+			name={ name }
+			value={ format(value) }
+			min={ format(min) }
+			max={ format(max) }
+			step={ format(step) }
+			class="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-secondary accent-primary"
+			data-patch
+			data-live={ name }
+		/>
+	</label>
+}
+
+func format(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+
+// Choice is a segmented control: two or three options, all visible, one click
+// to change. A <select> for "solid or gradient" hides half the answer behind a
+// menu, and the answer is what decides which controls sit underneath it.
+//
+// Radios, so it is keyboard-operable and needs no JavaScript to show which one
+// is on — the same mechanism [Swatch] uses, for the same reason.
+templ Choice(label string) {
+	<div class="space-y-1.5">
+		if label != "" {
+			<span class="block text-xs text-muted-foreground">{ label }</span>
+		}
+		<div class="inline-flex rounded-md border border-border/70 bg-background p-0.5">
+			{ children... }
+		</div>
+	</div>
+}
+
+templ ChoiceOption(name string, value string, label string, selected bool) {
+	<label class="cursor-pointer">
+		<input type="radio" name={ name } value={ value } checked?={ selected } class="peer sr-only" data-patch/>
+		<span class="block rounded px-3 py-1 text-xs text-muted-foreground transition-colors peer-checked:bg-secondary peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+			{ label }
+		</span>
+	</label>
+}
+
+// NativeSelect is a real <select> wearing the component styles. The
+// interactive shadcn Select needs a JavaScript bundle this application does
+// not serve, and a native select is better here anyway: it is keyboard- and
+// screen-reader-correct for free, and it survives an outlet swap.
+templ NativeSelect(name string, label string) {
+	<label class="block space-y-1.5">
+		if label != "" {
+			<span class="text-xs text-muted-foreground">{ label }</span>
+		}
+		<select name={ name } class="cn-native-select w-full" data-patch>
+			{ children... }
+		</select>
+	</label>
+}
+
+templ Option(value string, label string, selected bool) {
+	<option value={ value } selected?={ selected }>{ label }</option>
+}
+
+// Toolbar is the strip of actions above a panel.
+templ Toolbar() {
+	<div class="flex flex-wrap items-center gap-2">
+		{ children... }
+	</div>
+}
+
+// Count is the small number badge used for "3 of 5".
+templ Count(label string, tone string) {
+	if tone == "warn" {
+		@badge.Badge(badge.Props{Class: "bg-warning/15 text-warning border-transparent"}) {
+			{ label }
+		}
+	} else if tone == "done" {
+		@badge.Badge(badge.Props{Class: "bg-success/15 text-success border-transparent"}) {
+			{ label }
+		}
+	} else {
+		@badge.Badge(badge.Props{Variant: badge.VariantSecondary}) {
+			{ label }
+		}
+	}
+}
+
+// Slow is Action for something that shells out to a coding agent. Same
+// endpoint, same delegated listener — it just carries the sentence to show
+// while it runs, because thirty to ninety seconds of a merely-dimmed button
+// reads as broken and gets clicked again.
+templ Slow(label string, icon string, endpoint string, body string, variant button.Variant) {
+	@button.Button(button.Props{
+		Variant: variant,
+		Size:    button.SizeSm,
+		Attributes: templ.Attributes{
+			"data-action": endpoint,
+			"data-body":   body,
+			"data-slow":   "Working… this can take a minute",
+		},
+	}) {
+		if icon != "" {
+			@Icon(icon, "size-4")
+		}
+		{ label }
+	}
+}
+
+// Action is a button that posts JSON and re-renders the page. The endpoint and
+// the body are attributes rather than an inline handler, so forge.js can bind
+// every one of them with a single delegated listener.
+templ Action(label string, icon string, endpoint string, body string, variant button.Variant) {
+	@button.Button(button.Props{
+		Variant: variant,
+		Size:    button.SizeSm,
+		Attributes: templ.Attributes{
+			"data-action": endpoint,
+			"data-body":   body,
+		},
+	}) {
+		if icon != "" {
+			@Icon(icon, "size-4")
+		}
+		{ label }
+	}
+}
+
+// count is "1 screen" / "3 screens". Written out because the version selector
+// is read at a glance and "1 devices" is the kind of thing that makes an
+// interface look unfinished.
+// Count2 is "1 screen" / "3 screens", exported for the pages that list them.
+func Count2(n int, noun string) string { return count(n, noun) }
+
+func count(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
+}

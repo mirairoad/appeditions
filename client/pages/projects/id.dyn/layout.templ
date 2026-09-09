@@ -1,0 +1,181 @@
+package project
+
+import (
+	"context"
+	"strconv"
+	"strings"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/mirairoad/howl-go/core/router"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+)
+
+// The project workspace: the rail on the left, the step on the right, and one
+// status line across the bottom.
+//
+// The rail is navigation and never a gate. The steps are in the order the
+// decisions depend on — the look shapes the slots, the slots take the
+// screenshots, the copy sits on them — but every one of them is one click
+// away, because someone who wants to fix a headline before the last slot is
+// filled is not doing it wrong.
+templ Layout() {
+	{{ e := view.EditorOf(ctx) }}
+	<div class="mx-auto flex w-full max-w-[110rem] gap-8 px-5 py-8">
+		<!-- The rail as a drawer below lg. A checkbox and sibling selectors, so
+		     nothing here is JavaScript and nothing has to be re-hydrated after a
+		     navigation. -->
+		<input type="checkbox" id="rail" data-rail class="peer sr-only"/>
+		<label
+			for="rail"
+			data-rail-scrim
+			class="fixed inset-0 z-30 bg-black/40 lg:hidden"
+			aria-label="Close the steps"
+		></label>
+		<aside
+			data-rail-body
+			class="fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto rounded-none border-r border-border bg-sidebar p-4 lg:sticky lg:top-20 lg:z-auto lg:h-fit lg:w-64 lg:shrink-0 lg:rounded-xl lg:border lg:border-border"
+		>
+			<div class="mb-5">
+				<a href="/" class="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+					@ui.Icon("back", "size-3.5")
+					Projects
+				</a>
+				<div class="flex items-center gap-2.5">
+					@ui.ProjectIcon(e.Project, "size-9")
+					<div class="min-w-0 flex-1">
+						<h1 class="truncate text-lg font-semibold tracking-tight">{ e.Project.Name }</h1>
+						<p class="text-xs text-muted-foreground">{ sizeLabel(e) }</p>
+					</div>
+					<button
+						type="button"
+						class="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+						aria-label="Project settings"
+						data-panel-toggle={ ui.ProjectSettingsID(e.Project.ID) }
+					>
+						@ui.Icon("edit", "size-4")
+					</button>
+				</div>
+			</div>
+			@ui.Rail(e, currentStep(ctx, e.Project.ID))
+			<!-- What the editor is being *looked at* in: the store slot and
+			     the language. Both are links rather than controls — they are
+			     part of which page you are on, so a reload, a bookmark and the
+			     back button all have to keep them — and both live here rather
+			     than on a page, because every step is drawn in one of each and
+			     a switcher that moved between steps would read as a different
+			     question each time. -->
+			<div class="mt-5 space-y-3 border-t border-border/70 pt-4">
+				<p class="text-xs font-medium">Showing</p>
+				<!-- Version first: it owns the screens, and the other two only
+				     say how this version is being looked at. -->
+				@ui.VersionSelect(e, ui.StepPath(e.Project.ID, currentStep(ctx, e.Project.ID)))
+				@ui.SizeTabs(e, ui.StepPath(e.Project.ID, currentStep(ctx, e.Project.ID)))
+				@ui.LocaleSelect(e, ui.StepPath(e.Project.ID, currentStep(ctx, e.Project.ID)))
+			</div>
+			<div class="mt-6 border-t border-border/70 pt-4">
+				@statusLine(e)
+			</div>
+		</aside>
+		<div class="min-w-0 flex-1">
+			<div class="mb-4 flex items-center gap-3 lg:hidden">
+				<button
+					type="button"
+					class="inline-flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+					aria-controls="rail"
+					data-panel-toggle="rail"
+				>
+					@ui.Icon("menu", "size-4")
+					Steps
+				</button>
+				<span class="truncate text-sm font-medium">{ e.Project.Name }</span>
+			</div>
+			{ children... }
+		</div>
+	</div>
+	<!-- One per project workspace, so every step can open it by id. Outside
+	     the layout's flex row because it is fixed-position chrome, not a
+	     column. -->
+	@ui.ProjectSettings(e.Project, e.Locales, e.Sizes, e.Devices)
+}
+
+// currentStep is the last path segment, or "" for the project root. Derived
+// from the URL rather than passed down, so a page cannot claim to be a step it
+// is not.
+func currentStep(ctx context.Context, id string) string {
+	rest := strings.TrimPrefix(router.Current(ctx), "/projects/"+id)
+	return strings.Trim(rest, "/")
+}
+
+func sizeLabel(e view.Editor) string {
+	for _, s := range e.Sizes {
+		if s.ID == e.Project.Settings.SizeID {
+			return s.Label + " · " + strconv.Itoa(s.W) + "×" + strconv.Itoa(s.H)
+		}
+	}
+	return e.Project.Settings.SizeID
+}
+
+// statusLine is the one reading of how far along the set is. The rail, this
+// and the review page all read the same [model.Readiness]; a second count
+// would eventually disagree, and the disagreement would be about whether the
+// author may ship.
+templ statusLine(e view.Editor) {
+	{{ r := e.Readiness }}
+	<div class="space-y-2 text-xs">
+		if r.Total == 0 {
+			<p class="text-muted-foreground">No screens yet.</p>
+		} else {
+			<p class="flex items-center justify-between">
+				<span class="text-muted-foreground">Screenshots</span>
+				if r.MissingShots == 0 {
+					<span class="text-success">all { strconv.Itoa(r.Total) }</span>
+				} else {
+					<span class="text-warning">{ strconv.Itoa(r.Filled) } of { strconv.Itoa(r.Total) }</span>
+				}
+			</p>
+			<p class="flex items-center justify-between">
+				<span class="text-muted-foreground">Headlines</span>
+				if r.MissingCopy == 0 {
+					<span class="text-success">written</span>
+				} else {
+					<span class="text-warning">{ strconv.Itoa(r.MissingCopy) } missing</span>
+				}
+			</p>
+			<p class="flex items-center justify-between">
+				<span class="text-muted-foreground">Store tiles</span>
+				if r.OverLimit {
+					<span class="text-warning">{ strconv.Itoa(r.Tiles) } — { r.Store } takes { strconv.Itoa(r.Max) }</span>
+				} else if r.UnderMin {
+					<span class="text-warning">{ strconv.Itoa(r.Tiles) } — { r.Store } needs { strconv.Itoa(r.Min) }</span>
+				} else {
+					<span>{ strconv.Itoa(r.Tiles) }</span>
+				}
+			</p>
+		}
+		<div class="pt-1">
+			@button.Button(button.Props{
+				Size:     button.SizeSm,
+				Class:    "w-full",
+				Href:     ui.StepPath(e.Project.ID, "export"),
+				Variant:  exportVariant(r.CanExport),
+				Disabled: false,
+			}) {
+				@ui.Icon("export", "size-4")
+				if r.CanExport {
+					Export
+				} else {
+					Review
+				}
+			}
+		</div>
+	</div>
+}
+
+func exportVariant(ready bool) button.Variant {
+	if ready {
+		return button.VariantDefault
+	}
+	return button.VariantOutline
+}

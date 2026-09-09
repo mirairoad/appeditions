@@ -1,0 +1,335 @@
+package project
+
+import (
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+templ Head() {
+	<title>Release — AppEditions</title>
+}
+
+// Release is the first step: which submissions exist, and the words the store
+// shows beside each one's pictures.
+//
+// The page is a *list*, and the form is a modal. Every release has seven text
+// fields, a device picker and a language, and laid out down the page that is a
+// screen of form with the one thing you came to check — which versions exist
+// and what is in them — pushed below it. A list answers that at a glance and
+// opens the form when you actually want to type.
+//
+// The listing is per language, the way App Store Connect's is. A modal shows
+// whichever language the rail is on, so it stays one form rather than a grid
+// of eleven, and a language with nothing of its own falls back to the base one
+// on the way *out* — never into the fields, which would save the base
+// language's words into a language nobody has written yet.
+templ Release() {
+	{{ e := view.EditorOf(ctx) }}
+	<div class="max-w-4xl space-y-8">
+		<header class="flex flex-wrap items-end justify-between gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Release</h1>
+				<p class="mt-1 text-sm text-muted-foreground">
+					One submission per version: its screenshots, the devices it ships to, and the store listing in every language.
+				</p>
+			</div>
+			@button.Button(button.Props{Size: button.SizeSm, Attributes: ui.PanelToggle("new-version")}) {
+				@ui.Icon("plus", "size-4")
+				New version
+			}
+		</header>
+		@ui.Section("Versions", "Each one keeps its own screenshots, its own devices and its own words. The one being edited is what every other step is showing.") {
+			<ul class="space-y-3">
+				for _, v := range e.Project.Versions {
+					@versionRow(e, v)
+				}
+			</ul>
+		}
+	</div>
+	<!-- Modals after the list, never inside a row: position:fixed resolves
+	     against the nearest transformed ancestor, so one rendered inside a card
+	     that moves on hover is trapped in that card. -->
+	@releaseModal(e, model.Version{}, true)
+	for _, v := range e.Project.Versions {
+		@releaseModal(e, v, false)
+		if len(e.Project.Versions) > 1 {
+			@deleteVersionModal(e, v)
+		}
+	}
+}
+
+// versionRow is one submission, said in the four numbers that decide whether it
+// is ready: how many screens, which devices, how many languages have words, and
+// whether the base language has a description at all — which is the field the
+// store will not accept empty.
+templ versionRow(e view.Editor, v model.Version) {
+	{{ current := v.ID == e.Project.VersionID }}
+	<li
+		class={ "rounded-xl border p-4 transition-colors",
+			templ.KV("border-primary bg-primary/5", current),
+			templ.KV("border-border/70", !current) }
+	>
+		<div class="flex flex-wrap items-start gap-3">
+			<div class="min-w-0 flex-1">
+				<div class="flex items-center gap-2">
+					<h3 class="text-sm font-semibold">{ v.Name }</h3>
+					if current {
+						@ui.Count("editing", "done")
+					}
+					if !v.Own(e.Project.BaseLocale).Written() {
+						@ui.Count("no description", "warn")
+					}
+				</div>
+				<dl class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+					<div class="flex items-center gap-1.5">
+						@ui.Icon("shots", "size-3.5")
+						{ ui.Count2(len(v.Screens), "screen") }
+					</div>
+					<div class="flex items-center gap-1.5">
+						@ui.Icon("device", "size-3.5")
+						{ ui.DeviceSummary(v, e.Sizes) }
+					</div>
+					<div class="flex items-center gap-1.5">
+						@ui.Icon("copy", "size-3.5")
+						{ ui.Count2(len(v.Store), "language") } written
+					</div>
+				</dl>
+				if d := v.Text(e.Locale, e.Project.BaseLocale).Description; d != "" {
+					<p class="mt-2 line-clamp-2 text-xs text-muted-foreground/80">{ d }</p>
+				}
+			</div>
+			<div class="flex shrink-0 items-center gap-1.5">
+				if !current {
+					@button.Button(button.Props{
+						Variant: button.VariantOutline,
+						Size:    button.SizeSm,
+						Href:    ui.StepPath(e.Project.ID, "") + "?version=" + v.ID,
+					}) {
+						Switch to it
+					}
+				}
+				@button.Button(button.Props{Variant: button.VariantSecondary, Size: button.SizeSm, Attributes: ui.PanelToggle(editID(v))}) {
+					@ui.Icon("edit", "size-4")
+					Edit
+				}
+				if len(e.Project.Versions) > 1 {
+					<button
+						type="button"
+						class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+						aria-label={ "Delete " + v.Name }
+						data-panel-toggle={ "del-version-" + v.ID }
+					>
+						@ui.Icon("trash", "size-4")
+					</button>
+				}
+			</div>
+		</div>
+	</li>
+}
+
+func editID(v model.Version) string { return "edit-version-" + v.ID }
+
+// releaseModal is the whole form, for creating a version or editing one.
+//
+// One component for both, because they are the same seven fields and the same
+// endpoint shape — two of them would drift, and the drift would be a field
+// that saves when you edit and vanishes when you create.
+templ releaseModal(e view.Editor, v model.Version, creating bool) {
+	{{ id := editID(v) }}
+	{{ form := "release-form-" + v.ID }}
+	{{ endpoint := "/api/projects/" + e.Project.ID + "/release" }}
+	if creating {
+		{{ id = "new-version" }}
+		{{ form = "release-form-new" }}
+		{{ endpoint = "/api/projects/" + e.Project.ID + "/versions" }}
+		{{ v = e.Version }}
+	}
+	@ui.Modal(id, modalTitle(v, creating), modalHint(e, creating), releaseActions(form, creating)) {
+		<form id={ form } data-form={ endpoint } class="space-y-7">
+			if !creating {
+				<input type="hidden" name="version" value={ v.ID }/>
+			}
+			<input type="hidden" name="locale" value={ e.Locale }/>
+			@ui.Section("This version", "Free text, and nothing here parses it — whatever the store accepts.") {
+				<div class="grid gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
+					@ui.Field("Version", "name"+v.ID, model.MaxVersionName, nameLen(v, creating)) {
+						@input.Input(input.Props{
+							Name: "name", Value: nameValue(v, creating), Required: true,
+							Placeholder: "1.1.0",
+							Attributes:  ui.Counted("name"+v.ID, model.MaxVersionName),
+						})
+					}
+					@ui.Field("Copyright", "copyright"+v.ID, model.MaxCopyright, len([]rune(v.Copyright))) {
+						@input.Input(input.Props{
+							Name: "copyright", Value: v.Copyright,
+							Placeholder: "2026 Nobiru Pty Ltd",
+							Attributes:  ui.Counted("copyright"+v.ID, model.MaxCopyright),
+						})
+					}
+				</div>
+				<p class="text-xs text-muted-foreground">
+					Copyright is one per version for the whole app — Apple does not localise it, so it is not asked for once per language.
+				</p>
+			}
+			@ui.Section("Devices", "A release can ship to fewer devices than the last one did. The export writes only the folders this version names.") {
+				@ui.Devices(e.Project, e.Sizes, e.Devices)
+			}
+			@ui.Section("Store listing — "+localeLabel(e, e.Locale), listingHint(e)) {
+				{{ m := v.Own(e.Locale) }}
+				@ui.Field("Promotional text", "promo"+v.ID, model.MaxPromotional, len([]rune(m.Promotional))) {
+					@textarea.Textarea(textarea.Props{
+						Name: "promotional", Rows: 2, Value: m.Promotional,
+						Placeholder: "Now with voice capture — say the whole list in one breath.",
+						Attributes:  ui.Counted("promo"+v.ID, model.MaxPromotional),
+					})
+				}
+				<p class="-mt-1 text-xs text-muted-foreground">
+					Sits above the description and can be changed without submitting a build, which is what it is for.
+				</p>
+				@ui.Field("Description", "desc"+v.ID, model.MaxDescription, len([]rune(m.Description))) {
+					@textarea.Textarea(textarea.Props{
+						Name: "description", Rows: 8, Value: m.Description,
+						Placeholder: "What the app does, who it is for, and why this one.",
+						Attributes:  ui.Counted("desc"+v.ID, model.MaxDescription),
+					})
+				}
+				@ui.Field("What's New in This Version", "new"+v.ID, model.MaxWhatsNew, len([]rune(m.WhatsNew))) {
+					@textarea.Textarea(textarea.Props{
+						Name: "whats_new", Rows: 4, Value: m.WhatsNew,
+						Placeholder: "• Voice capture\n• Faster sync\n• Fixed a crash when importing recipes",
+						Attributes:  ui.Counted("new"+v.ID, model.MaxWhatsNew),
+					})
+				}
+				<p class="-mt-1 text-xs text-muted-foreground">Required for every version after the first.</p>
+				@ui.Field("Keywords", "kw"+v.ID, model.MaxKeywords, len([]rune(m.Keywords))) {
+					@input.Input(input.Props{
+						Name: "keywords", Value: m.Keywords,
+						Placeholder: "shopping list,groceries,voice,household",
+						Attributes:  ui.Counted("kw"+v.ID, model.MaxKeywords),
+					})
+				}
+				<p class="-mt-1 text-xs text-muted-foreground">
+					One comma-separated list, and the commas count against the 100.
+				</p>
+				<div class="grid gap-4 sm:grid-cols-2">
+					@ui.Field("Support URL", "support"+v.ID, 0, 0) {
+						@input.Input(input.Props{Name: "support_url", Type: "url", Value: m.SupportURL, Placeholder: "https://example.com/support"})
+					}
+					@ui.Field("Marketing URL", "marketing"+v.ID, 0, 0) {
+						@input.Input(input.Props{Name: "marketing_url", Type: "url", Value: m.MarketingURL, Placeholder: "https://example.com"})
+					}
+				</div>
+			}
+		</form>
+	}
+}
+
+templ releaseActions(form string, creating bool) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{
+			Type:       button.TypeSubmit,
+			Size:       button.SizeSm,
+			Attributes: templ.Attributes{"form": form},
+		}) {
+			if creating {
+				Create version
+			} else {
+				Save
+			}
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeSm, Attributes: templ.Attributes{"data-panel-toggle": modalIDFor(form)}}) {
+			Cancel
+		}
+	</div>
+}
+
+// modalIDFor recovers the checkbox id from the form id. They are minted
+// together, so one function owns the pairing rather than two call sites
+// agreeing by hand.
+func modalIDFor(form string) string {
+	if form == "release-form-new" {
+		return "new-version"
+	}
+	return "edit-version-" + form[len("release-form-"):]
+}
+
+func modalTitle(v model.Version, creating bool) string {
+	if creating {
+		return "New version"
+	}
+	return "Edit " + v.Name
+}
+
+func modalHint(e view.Editor, creating bool) string {
+	if creating {
+		return "It starts as a copy of " + e.Version.Name + " — the same screenshots, devices and words, ready to change."
+	}
+	return "Editing in " + localeLabel(e, e.Locale) + ". Switch language in the sidebar."
+}
+
+// nameValue is empty when creating: a version named the same as the one it was
+// copied from is never what anybody wants, and prefilling it makes the mistake
+// one keystroke away.
+func nameValue(v model.Version, creating bool) string {
+	if creating {
+		return ""
+	}
+	return v.Name
+}
+
+func nameLen(v model.Version, creating bool) int {
+	return len([]rune(nameValue(v, creating)))
+}
+
+func listingHint(e view.Editor) string {
+	if e.Locale == e.Project.BaseLocale {
+		return "The base language. Every other one falls back to this until it has words of its own."
+	}
+	return "Empty fields fall back to " + localeLabel(e, e.Project.BaseLocale) + " on the way out, never into the form."
+}
+
+func localeLabel(e view.Editor, tag string) string {
+	for _, l := range e.Locales {
+		if l.Tag == tag {
+			return l.Label
+		}
+	}
+	return tag
+}
+
+templ deleteVersionModal(e view.Editor, v model.Version) {
+	@ui.Modal("del-version-"+v.ID, "Delete "+v.Name+"?", "", deleteVersionActions(e, v)) {
+		<div class="space-y-3 text-sm">
+			<p>
+				This removes the version, its { ui.Count2(len(v.Screens), "screen") } and its listing in every language.
+			</p>
+			<p class="text-muted-foreground">
+				The screenshots themselves stay — they are the project's originals, and any other version using them keeps them. Anything already exported stays on disk too.
+			</p>
+		</div>
+	}
+}
+
+templ deleteVersionActions(e view.Editor, v model.Version) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{
+			Variant: button.VariantDestructive,
+			Size:    button.SizeSm,
+			Attributes: templ.Attributes{
+				"data-action": "/api/projects/" + e.Project.ID + "/version-delete",
+				"data-body":   `{"version":"` + v.ID + `"}`,
+			},
+		}) {
+			@ui.Icon("trash", "size-4")
+			Delete version
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeSm, Attributes: ui.PanelToggle("del-version-" + v.ID)}) {
+			Cancel
+		}
+	</div>
+}

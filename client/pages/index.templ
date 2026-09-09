@@ -1,0 +1,329 @@
+package pages
+
+import (
+	"context"
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+templ Head() {
+	<title>Projects — AppEditions</title>
+}
+
+// Index is the home page: the projects, and the form that makes one.
+//
+// A project is the unit everything else hangs off — its screenshots, its
+// languages and its look all live inside it — so this is also where the
+// decisions that are painful to change later are made: which store size, and
+// which languages the set ships in.
+templ Index() {
+	{{ v := view.ProjectsOf(ctx) }}
+	<div class="mx-auto w-full max-w-6xl px-5 py-10">
+		<header class="mb-8 flex flex-wrap items-end justify-between gap-4">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Projects</h1>
+				<p class="mt-1 text-sm text-muted-foreground">
+					One project per app. Its screenshots, its languages and its look live together.
+				</p>
+			</div>
+			@button.Button(button.Props{Attributes: panelToggle("new-project")}) {
+				@ui.Icon("plus", "size-4")
+				New project
+			}
+		</header>
+		if len(v.Items) == 0 {
+			@ui.Empty("No projects yet", "")
+		} else {
+			<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				for _, item := range v.Items {
+					<li>
+						@projectCard(item)
+					</li>
+				}
+			</ul>
+			<!-- Outside the cards: a card carries a hover transform, and a
+			     transform on an ancestor makes `position: fixed` resolve
+			     against that ancestor instead of the viewport — which would
+			     put every one of these modals inside a 360px card. -->
+			for _, item := range v.Items {
+				@ui.ProjectSettings(item.Project, v.Locales, v.Sizes, v.Devices)
+				@deleteProjectModal(item)
+			}
+		}
+		@newProjectModal(v)
+	</div>
+}
+
+templ projectCard(item view.ProjectCard) {
+	{{ p := item.Project }}
+	<div class="group relative h-full overflow-hidden rounded-xl border border-border bg-card transition-transform hover:-translate-y-0.5">
+		<!-- The whole card opens the project. An overlay link rather than an
+		     anchor wrapping everything, because the edit and delete buttons are
+		     interactive and nesting those inside an <a> is neither valid nor
+		     clickable. -->
+		<a href={ templ.SafeURL("/projects/" + p.ID) } class="absolute inset-0 z-10" aria-label={ "Open " + p.Name }></a>
+		<div class="flex aspect-[16/10] items-center justify-center overflow-hidden bg-secondary/40 p-4">
+			if item.CoverScreen != "" {
+				<img
+					src={ "/api/preview/" + p.ID + "/" + item.CoverScreen + "?w=160&locale=" + p.BaseLocale + "&v=" + coverTag(item) }
+					alt=""
+					loading="lazy"
+					class="h-full w-auto rounded-md tile-shadow"
+				/>
+			} else {
+				@ui.Icon("shots", "size-8 text-muted-foreground/40")
+			}
+		</div>
+		<div class="flex items-start gap-3 p-4">
+			@ui.ProjectIcon(p, "size-11 text-lg")
+			<div class="min-w-0 flex-1">
+				<div class="flex items-start justify-between gap-2">
+					<h2 class="truncate text-sm font-semibold">{ p.Name }</h2>
+					if item.Readiness.CanExport {
+						@ui.Count("ready", "done")
+					} else if item.Readiness.Total > 0 {
+						@ui.Count(strconv.Itoa(item.Readiness.Filled)+" of "+strconv.Itoa(item.Readiness.Total), "warn")
+					}
+				</div>
+				<p class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+					<span>{ strconv.Itoa(len(p.Locales)) } language{ plural(len(p.Locales)) }</span>
+					<span>·</span>
+					<span>{ item.Updated }</span>
+				</p>
+			</div>
+			<!-- Above the overlay link, or the link swallows the clicks. -->
+			<div class="relative z-20 -mr-1 -mt-1 flex shrink-0 items-center">
+				<button
+					type="button"
+					class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+					aria-label={ "Settings for " + p.Name }
+					data-panel-toggle={ ui.ProjectSettingsID(p.ID) }
+				>
+					@ui.Icon("edit", "size-4")
+				</button>
+				<button
+					type="button"
+					class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+					aria-label={ "Delete " + p.Name }
+					data-panel-toggle={ "delete-" + p.ID }
+				>
+					@ui.Icon("trash", "size-4")
+				</button>
+			</div>
+		</div>
+	</div>
+}
+
+// deleteProjectModal is the confirmation. It says what delete actually does,
+// because the answer is not obvious: the project leaves the application and
+// the files stay on disk. A confirmation that only asks "are you sure?"
+// teaches nothing and gets clicked through.
+templ deleteProjectModal(item view.ProjectCard) {
+	{{ p := item.Project }}
+	@ui.Modal("delete-"+p.ID, "Delete "+p.Name+"?", "", deleteProjectActions(p)) {
+		<div class="space-y-3 text-sm">
+			<p>This removes the project from AppEditions — its screens, its copy in every language, and its look.</p>
+			<p class="text-muted-foreground">
+				The files stay where they are. Your original screenshots and anything you have already exported remain in
+				<code class="font-mono text-foreground">{ dataDir(ctx) }/{ p.Slug }</code>, so nothing you have uploaded to a store is destroyed by this.
+			</p>
+			if item.Readiness.Total > 0 {
+				<p class="text-muted-foreground">
+					{ strconv.Itoa(item.Readiness.Total) } screen{ plural(item.Readiness.Total) } · { strconv.Itoa(len(p.Locales)) } language{ plural(len(p.Locales)) }
+				</p>
+			}
+		</div>
+	}
+}
+
+templ deleteProjectActions(p model.Project) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{
+			Variant: button.VariantDestructive,
+			Attributes: templ.Attributes{
+				"data-action": "/api/projects/" + p.ID + "/delete",
+				"data-body":   "{}",
+			},
+		}) {
+			@ui.Icon("trash", "size-4")
+			Delete project
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Attributes: ui.PanelToggle("delete-" + p.ID)}) {
+			Cancel
+		}
+	</div>
+}
+
+// dataDir is where the files live, for the sentence above. Read from the shell
+// state rather than hardcoded, because it moves with APPEDITIONS_HOME.
+func dataDir(ctx context.Context) string { return view.ShellOf(ctx).DataDir }
+
+// panelToggle is ui.PanelToggle, re-exported here so the markup above reads as
+// one word rather than a package call.
+func panelToggle(id string) templ.Attributes { return ui.PanelToggle(id) }
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// newProjectModal is where a project is made. It is a modal rather than a
+// panel on the page because it is the one form here with real consequences:
+// the store size shapes every render and the base language is what every other
+// language is translated from, and both are painful to change once there are
+// screenshots in the set.
+//
+// It also carries the explanation of what this program is. That used to live in
+// the empty state, where it was only ever read by someone who had no projects —
+// which is exactly the person who then had to leave it to find the button.
+templ newProjectModal(v view.Projects) {
+	@ui.Modal("new-project", "New project", "One project per app: its screenshots, its languages and its look live together.", newProjectActions()) {
+		@howItWorks()
+		<form id="new-project-form" data-form="/api/projects" data-redirect="/projects/{id}" class="mt-6 space-y-6">
+			<div class="grid gap-4 sm:grid-cols-2">
+				<label class="space-y-1.5">
+					<span class="text-sm font-medium">App name</span>
+					@input.Input(input.Props{ID: "np-name", Name: "name", Required: true, Placeholder: "Nobiru"})
+					<span class="block text-xs text-muted-foreground">
+						Names the folder your files land in. It does not change if you rename the project later.
+					</span>
+				</label>
+				<label class="space-y-1.5">
+					<span class="text-sm font-medium">Look</span>
+					<select name="template_id" class="cn-native-select w-full">
+						for _, t := range v.Templates {
+							<option value={ t.ID } selected?={ t.Label == "Classic" }>{ t.Label }</option>
+						}
+					</select>
+					<span class="block text-xs text-muted-foreground">
+						Changeable at any time — a template is a reset, not a commitment.
+					</span>
+				</label>
+			</div>
+			<fieldset class="space-y-2">
+				<legend class="text-sm font-medium">Devices</legend>
+				<p class="text-xs text-muted-foreground">
+					Tick every device family you ship to — iPhone, iPad and Android at once if you like. The same screens and the same copy are drawn at each, and each gets its own export folder. Only the largest device per family is required; both stores downscale for the rest.
+				</p>
+				<div class="flex flex-wrap gap-1.5 pt-1">
+					for _, size := range v.Sizes {
+						<label class="cursor-pointer">
+							<input
+								type="checkbox"
+								name="sizes"
+								value={ size.ID }
+								checked?={ size.ID == "iphone-6-9" }
+								class="peer sr-only"
+							/>
+							<span class="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+								{ size.Label }
+								<span class="text-[10px] text-muted-foreground/70">{ strconv.Itoa(size.W) }×{ strconv.Itoa(size.H) }</span>
+							</span>
+						</label>
+					}
+				</div>
+			</fieldset>
+			<label class="block space-y-1.5">
+				<span class="text-sm font-medium">What does the app do?</span>
+				@textarea.Textarea(textarea.Props{
+					ID:          "np-description",
+					Name:        "description",
+					Rows:        3,
+					Placeholder: "A shared grocery list you can add to by talking to it. For households, not teams. The list syncs instantly and works offline.",
+				})
+				<span class="block text-xs text-muted-foreground">
+					In your own words, and worth a minute: this is what the copy assistant is grounded in. Without it, it writes plausible marketing about nothing in particular.
+				</span>
+			</label>
+			<fieldset class="space-y-2">
+				<legend class="text-sm font-medium">Languages</legend>
+				<p class="text-xs text-muted-foreground">
+					The first one you tick is the language you write in; the rest are translated from it. You can add more at any time.
+				</p>
+				<div class="flex flex-wrap gap-1.5 pt-1">
+					for _, l := range v.Locales {
+						<label class="cursor-pointer">
+							<input
+								type="checkbox"
+								name="locales"
+								value={ l.Tag }
+								checked?={ l.Tag == "en-US" }
+								class="peer sr-only"
+							/>
+							<span class="inline-block rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+								{ l.Label }
+							</span>
+						</label>
+					}
+				</div>
+			</fieldset>
+		</form>
+	}
+}
+
+// newProjectActions is the modal's pinned footer. The buttons are outside the
+// form, so the submit one names it: a button with form="<id>" submits that form
+// from anywhere in the document, which is what lets the actions stay visible
+// while the fields scroll.
+templ newProjectActions() {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{Type: button.TypeSubmit, Attributes: templ.Attributes{"form": "new-project-form"}}) {
+			Create project
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Attributes: panelToggle("new-project")}) {
+			Cancel
+		}
+	</div>
+}
+
+// howItWorks is the whole program in four lines. It is here, at the top of the
+// only form that creates anything, because that is the moment someone is
+// deciding whether this tool does what they came for.
+templ howItWorks() {
+	<div class="rounded-lg border border-border/70 bg-secondary/30 p-4">
+		<p class="text-sm">
+			AppEditions turns raw app screenshots into the framed, captioned images the
+			stores ask for — at exact pixel sizes, in every language you ship in.
+		</p>
+		<ol class="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+			@howStep("1", "Pick a look", "A template lays out the set — background, device frame, type and the rhythm down the strip.")
+			@howStep("2", "Drop your captures in", "Straight from the simulator. They are copied in and never modified; framing happens at render time.")
+			@howStep("3", "Write the headlines", "One per screen, per language. If you have the claude or codex CLI, it can draft or translate them.")
+			@howStep("4", "Export", "One folder per language, named the way the store expects, written to disk on this machine.")
+		</ol>
+		<p class="mt-3 text-xs text-muted-foreground/80">
+			Nothing is uploaded anywhere. Every image you see in the editor was drawn by this process.
+		</p>
+	</div>
+}
+
+templ howStep(n string, title string, body string) {
+	<li class="flex gap-2.5">
+		<span class="mt-px flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-foreground">{ n }</span>
+		<span>
+			<span class="block font-medium text-foreground">{ title }</span>
+			{ body }
+		</span>
+	</li>
+}
+
+// coverTag names the drawing in the card's tile URL, so returning to the list
+// repaints from cache instead of blanking for a revalidation. Empty when the
+// screen has gone: the handler then falls back to no-cache, which is correct
+// and merely slower.
+func coverTag(item view.ProjectCard) string {
+	screen, ok := item.Project.Screen(item.CoverScreen)
+	if !ok {
+		return ""
+	}
+	return model.PreviewTag(item.Project, *screen, screen.Text(item.Project.BaseLocale, item.Project.BaseLocale), 160)
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "howl": {
+      "command": "go",
+      "args": ["run", "github.com/mirairoad/howl-go/core/cmd/howl", "mcp"]
+    }
+  }
+}

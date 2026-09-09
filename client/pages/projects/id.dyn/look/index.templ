@@ -1,0 +1,219 @@
+package look
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/card"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+templ Head() {
+	<title>Design — AppEditions</title>
+}
+
+// Look is where the set gets its house style: pick a template, then the
+// structure every tile is built on.
+//
+// A template here is a stored document rather than a constant in the source,
+// which is the difference that matters: the shipped ones are a starting point,
+// anything can be duplicated and edited, and a look that took an afternoon to
+// tune is saved once and applied to next release's set in a click.
+templ Look() {
+	{{ e := view.EditorOf(ctx) }}
+	<!-- The drop target is the whole step. There is no dashed box saying "or
+	     drag them here": the button says it, and a third of the page repeating
+	     it is a third of the page not showing the set. -->
+	<div class="space-y-10" data-drop={ "/api/projects/" + e.Project.ID + "/shots" }>
+		<header class="flex flex-wrap items-end justify-between gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Design</h1>
+				<p class="mt-1 text-sm text-muted-foreground">
+					The look, and the pictures in it. Applying a template lays out one tile of every composition it knows — keep the ones that suit your app and delete the rest.
+				</p>
+			</div>
+			<div class="flex items-center gap-2">
+				@button.Button(button.Props{Variant: button.VariantOutline, Size: button.SizeSm, Attributes: ui.PanelToggle(ui.MediaID)}) {
+					@ui.Icon("shots", "size-4")
+					Media
+					if n := len(e.Assets); n > 0 {
+						<span class="ml-0.5 rounded bg-secondary px-1.5 text-[10px] text-muted-foreground">{ strconv.Itoa(n) }</span>
+					}
+				}
+				@button.Button(button.Props{Size: button.SizeSm, Attributes: ui.Picks("shot-input")}) {
+					@ui.Icon("upload", "size-4")
+					Choose files
+				}
+			</div>
+		</header>
+		<input id="shot-input" type="file" accept="image/*" multiple class="sr-only" data-upload={ "/api/projects/" + e.Project.ID + "/shots" }/>
+		@ui.Section("Templates", "Applying one resets the look and lays out its slots. Your screenshots and their words are kept.") {
+			<ul class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+				for _, t := range e.Templates {
+					<li>
+						@templateCard(e, t)
+					</li>
+				}
+			</ul>
+		}
+		if len(e.Project.Screens()) > 0 {
+			@ui.Section("The set", "Every tile this version exports, drawn by the same code that writes the files. A two-tile composition is two of them — that is what it produces, two files, and removing either takes both.") {
+				@strip(e)
+			}
+		} else {
+			@ui.Empty("Nothing in the set yet", "Applying a template lays out its slots here, ready for your captures.")
+		}
+	</div>
+	@ui.Media(e)
+}
+
+// strip is every tile this version exports, at a size you can actually judge.
+//
+// A grid rather than a horizontal scroller: the set has to hold together as a
+// sequence, and a scroller shows three of them and hides the rest behind a
+// gesture. The halves of a panorama are two cards, because they are two files
+// — showing the composition they are cut from would hide where the cut falls.
+//
+// Every card carries the whole of what you can do to a tile: give it a
+// picture, move it, throw it away. That used to be a separate step, and having
+// it here is the point of the merge — the look and the pictures are one
+// decision, made by looking at one grid.
+//
+// The picture button picks from Media rather than opening a file dialog: a
+// screenshot enters the project once, through Media, and every tile after that
+// is a reference to it.
+//
+// No captions on the halves of a panorama — no "part 2 of screen 1", no "both
+// halves". They sit side by side in the grid and read as one drawing cut in
+// two; the picker and the delete confirmation say what an edit does to both,
+// which is the part that is not visible. A note on every card was prose
+// explaining a picture that explains itself.
+//
+// Comments here are Go, not <!-- -->: markup comments inside this loop are
+// rendered once per card, and eleven copies of a paragraph shipped to the
+// browser is eleven copies of a paragraph nobody reads.
+templ strip(e view.Editor) {
+	<ol class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+		for i, screen := range e.Project.Screens() {
+			<li class="space-y-1.5">
+				<a
+					href={ templ.SafeURL(ui.StepPath(e.Project.ID, "tune") + "?screen=" + screen.ID) }
+					class="block rounded-lg outline-offset-4 transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+				>
+					@ui.Tile(e, screen, 180, "")
+				</a>
+				<div class="flex items-start gap-1">
+					<span class="min-w-0 flex-1 text-[11px] text-muted-foreground">
+						<span class="block truncate" title={ ui.ScreenName(e, screen) }>
+							{ strconv.Itoa(i + 1) }.
+							if screen.Filled() {
+								{ ui.ScreenName(e, screen) }
+							} else {
+								<span class="text-warning">empty slot</span>
+							}
+						</span>
+					</span>
+					<span class="flex shrink-0 items-center">
+						@iconAction(e.Project.ID, screen.ID, "up", "up", i > 0)
+						@iconAction(e.Project.ID, screen.ID, "down", "down", i < len(e.Project.Screens())-1)
+						<button
+							type="button"
+							class="rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+							aria-label={ swapLabel(screen) }
+							title={ swapLabel(screen) }
+							data-panel-toggle={ ui.PickPictureID(screen.ID) }
+						>
+							@ui.Icon("swap", "size-3.5")
+						</button>
+						@ui.RemoveScreenButton(screen, "")
+					</span>
+				</div>
+			</li>
+		}
+	</ol>
+	for i, screen := range e.Project.Screens() {
+		@ui.RemoveScreenModal(e, i, screen)
+		@ui.PickPicture(e, screen)
+	}
+}
+
+// iconAction moves a screen up or down the set. Rendered only when the move is
+// possible, so a disabled-looking control that does nothing never appears.
+templ iconAction(projectID string, screenID string, icon string, direction string, enabled bool) {
+	if enabled {
+		<button
+			type="button"
+			class="rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+			data-action={ "/api/projects/" + projectID + "/screens/" + screenID + "/move" }
+			data-body={ `{"direction":"` + direction + `"}` }
+			aria-label={ "Move " + direction }
+		>
+			@ui.Icon(icon, "size-3.5")
+		</button>
+	}
+}
+
+func headlineOrPlaceholder(e view.Editor, screen model.Screen) string {
+	if h := e.Copy(screen).Headline; h != "" {
+		return h
+	}
+	return "no headline"
+}
+
+// templateCard shows the template drawn, not described. The thumbnail is a
+// real render of the template's own first variant over the drawn placeholder
+// screenshot, so what is on the card is what applying it produces.
+templ templateCard(e view.Editor, t model.Template) {
+	@card.Card(card.Props{Class: "gap-0 overflow-hidden py-0 h-full"}) {
+		<div class="flex items-center justify-center gap-1.5 bg-secondary/40 p-4">
+			<!-- One <img> per store tile. A panorama template ships two files,
+			     so its card shows two tiles rather than the composition they
+			     are cut from — which is near-square and sits wrong in a grid
+			     of portrait cards.
+			     
+			     Rendered at 220 rather than 120: the card is a picture, and it
+			     is the only thing on it that carries any information. -->
+			for part := range view.TemplateSpan(t) {
+				<img
+					src={ fmt.Sprintf("/api/template-preview/%s?w=220&part=%d&size_id=%s&device_id=%s&v=%s", t.ID, part, e.Project.Settings.SizeID, e.Project.Settings.DeviceID,
+						model.TemplateTag(t, e.Project.Settings.SizeID, e.Project.Settings.DeviceID, 220, part)) }
+					alt=""
+					loading="lazy"
+					class="h-64 w-auto rounded-md tile-shadow"
+				/>
+			}
+		</div>
+		<!-- One row, not four. The description said in prose what the picture
+		     above says at a glance — "deep blue-black, one big device per tile"
+		     under a picture of exactly that — and it took two thirds of the
+		     card's white to say it. -->
+		<div class="flex items-center gap-2 px-3 py-2.5">
+			<span class="min-w-0 flex-1">
+				<span class="block truncate text-sm font-medium">{ t.Label }</span>
+				if t.Slots() > 0 {
+					<span class="block text-[11px] text-muted-foreground">{ strconv.Itoa(view.TemplateTiles(t)) } tiles</span>
+				}
+			</span>
+			if t.ID == e.Project.TemplateID {
+				@ui.Count("current", "done")
+			} else {
+				@ui.Action("Apply", "", "/api/projects/"+e.Project.ID+"/template", `{"template_id":"`+t.ID+`"}`, button.VariantSecondary)
+			}
+		</div>
+	}
+}
+
+// swapLabel is the only place the picture button says anything, so it says
+// which of the two things it does — an icon that means "replace" on a filled
+// tile and "fill" on an empty one needs a name, and the tile's dashed outline
+// is what tells them apart on screen.
+func swapLabel(screen model.Screen) string {
+	if screen.Filled() {
+		return "Replace the picture"
+	}
+	return "Fill this slot"
+}

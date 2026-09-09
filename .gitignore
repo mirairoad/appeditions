@@ -1,0 +1,16 @@
+# Build artefacts
+/appeditions
+/appeditions-desktop
+# `make package` output: the .app bundle and the Linux install tree, both
+# rebuilt from the binary and desktop/packaging/icon.png.
+/dist/
+
+# The Tailwind toolchain, installed on demand by `make css`. The compiled
+# stylesheet (client/public/app.css) is committed on purpose, so every other
+# target stays offline.
+/.howl/
+# Written by `make css` with this machine's module-cache path.
+/client/styles/app.sources.css
+
+# Local data, when APPEDITIONS_HOME points here rather than at ~/.appeditions
+/.appeditions/

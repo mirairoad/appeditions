@@ -1,0 +1,224 @@
+package export
+
+import (
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+templ Head() {
+	<title>Review & export — AppEditions</title>
+}
+
+// Export is the last look and the button.
+//
+// The review is the set inside a mock store page, at the size it will actually
+// be seen: a strip of tiles scrolling sideways under an app name. Judging a
+// headline at full screen is how you ship one that is unreadable in the store.
+templ Export() {
+	{{ e := view.EditorOf(ctx) }}
+	{{ r := e.Readiness }}
+	<div class="space-y-8">
+		<header class="flex flex-wrap items-end justify-between gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Review &amp; export</h1>
+				<p class="mt-1 text-sm text-muted-foreground">
+					One folder per device and language, named the way the store expects, written under your project directory.
+				</p>
+			</div>
+			@ui.LocaleTabs(e, ui.StepPath(e.Project.ID, "export"))
+		</header>
+		if !r.CanExport {
+			<div class="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
+				@ui.Icon("alert", "size-5 shrink-0 text-warning")
+				<div>
+					<p class="font-medium">
+						{ strconv.Itoa(r.MissingShots) } slot{ plural(r.MissingShots) } still empty
+					</p>
+					<p class="mt-0.5 text-muted-foreground">
+						Every slot needs a screenshot before the set can be written.
+						<a href={ templ.SafeURL(ui.StepPath(e.Project.ID, "look")) } class="text-primary underline underline-offset-4">Fill them</a>.
+					</p>
+				</div>
+			</div>
+		}
+		if r.OverLimit || r.UnderMin {
+			<div class="flex items-start gap-3 rounded-xl border border-border/70 p-4 text-sm">
+				@ui.Icon("info", "size-5 shrink-0 text-muted-foreground")
+				<p class="text-muted-foreground">
+					This set is { strconv.Itoa(r.Tiles) } store tiles.
+					{ r.Store } accepts { strconv.Itoa(r.Min) } to { strconv.Itoa(r.Max) }.
+					You can still export — the count is advice, and you may know something this does not.
+				</p>
+			</div>
+		}
+		@storePreview(e)
+		@ui.Section("Write the files", "") {
+			<form data-form={ "/api/projects/" + e.Project.ID + "/export" } class="space-y-4 rounded-xl border border-border/70 p-4">
+				if len(e.Project.Targets()) > 1 {
+					<fieldset class="space-y-2">
+						<legend class="text-sm font-medium">Devices</legend>
+						<div class="flex flex-wrap gap-1.5">
+							for _, t := range e.Project.Targets() {
+								{{ size := e.SizeOf(t.SizeID) }}
+								<label class="cursor-pointer">
+									<input type="checkbox" name="sizes" value={ t.SizeID } checked class="peer sr-only"/>
+									<span class="inline-block rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground">
+										{ size.Label }
+									</span>
+								</label>
+							}
+						</div>
+					</fieldset>
+				}
+				<fieldset class="space-y-2">
+					<legend class="text-sm font-medium">Languages</legend>
+					<div class="flex flex-wrap gap-1.5">
+						for _, tag := range e.Project.Locales {
+							<label class="cursor-pointer">
+								<input type="checkbox" name="locales" value={ tag } checked class="peer sr-only"/>
+								<span class="inline-block rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground">
+									{ tag }
+								</span>
+							</label>
+						}
+					</div>
+				</fieldset>
+				<label class="flex items-start gap-2.5">
+					<input type="checkbox" name="listing" value="1" checked data-bool class="mt-0.5 size-4 accent-primary"/>
+					<span>
+						<span class="block text-sm font-medium">Include the store listing</span>
+						<span class="block text-xs text-muted-foreground">
+							Writes this release's description, What's New, keywords and URLs into each language's folder as <code class="font-mono">listing.txt</code>, so the words and the pictures for one upload are in one place.
+						</span>
+					</span>
+				</label>
+				<div class="grid gap-4 sm:grid-cols-2">
+					<label class="space-y-1.5">
+						<span class="text-sm font-medium">Format</span>
+						<select name="format" class="cn-native-select w-full">
+							<option value="png" selected?={ e.Project.Format == model.FormatPNG }>PNG</option>
+							<option value="jpeg" selected?={ e.Project.Format == model.FormatJPEG }>JPEG (no alpha channel)</option>
+						</select>
+						<span class="block text-xs text-muted-foreground">
+							App Store Connect rejects images carrying an alpha channel, and a PNG always has one even when every pixel is opaque. If an upload is refused, switch to JPEG and export again.
+						</span>
+					</label>
+					<div class="flex flex-col justify-end gap-1.5">
+						@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !r.CanExport}) {
+							@ui.Icon("export", "size-4")
+							Export
+						}
+						<!-- The count is rendered here and kept honest by
+						     forge.js as the boxes are clicked: the answer to
+						     "what will this write" has to be true before the
+						     button is pressed, not after. -->
+						<span class="text-xs text-muted-foreground">
+							<span data-sets class="font-medium text-foreground data-[empty=true]:text-warning">
+								{ folders(len(e.Project.Targets()), len(e.Project.Locales)) }
+							</span>
+							{ ", " + strconv.Itoa(r.Tiles) + " tiles each" }
+						</span>
+					</div>
+				</div>
+				<div data-result class="hidden rounded-lg border border-success/40 bg-success/10 p-3 text-sm"></div>
+			</form>
+		}
+		if len(e.Exports) > 0 {
+			@ui.Section("Take it with you", "") {
+				<div class="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 p-4">
+					@button.Button(button.Props{
+						Href: "/api/projects/" + e.Project.ID + "/export.zip",
+						Attributes: templ.Attributes{
+							// The browser's own save panel, rather than a list
+							// of paths to copy by hand. One file because a
+							// folder is not something a download can be, and
+							// the tree inside it is the shape Connect wants.
+							"download": "",
+						},
+					}) {
+						@ui.Icon("export", "size-4")
+						Save a copy
+					}
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+						data-action="/api/reveal"
+						data-body={ `{"path":"` + e.ExportsDir + `"}` }
+					>
+						@ui.Icon("folder", "size-4")
+						Show in Finder
+					</button>
+					<p class="w-full text-xs text-muted-foreground">
+						A copy is already on disk at <code class="font-mono">{ e.ExportsDir }</code> — every export writes there first, and replaces what was in it.
+					</p>
+				</div>
+			}
+		}
+	</div>
+}
+
+// storePreview is the set as a product page sees it: a horizontal strip under
+// the app's name, at roughly the size a phone shows. Nothing here reaches an
+// exported pixel — it exists so the last judgement is made at the size the
+// decision is actually about.
+templ storePreview(e view.Editor) {
+	<div class="rounded-xl border border-border/70 bg-surface/60 p-5">
+		<div class="mb-4 flex items-center gap-3">
+			<div class="flex size-12 items-center justify-center rounded-xl bg-secondary text-lg font-semibold">
+				{ initial(e.Project.Name) }
+			</div>
+			<div class="min-w-0">
+				<p class="truncate text-sm font-semibold">{ e.Project.Name }</p>
+				<p class="truncate text-xs text-muted-foreground">
+					if e.Project.Listing.Subtitle != "" {
+						{ e.Project.Listing.Subtitle }
+					} else {
+						{ e.Project.Description }
+					}
+				</p>
+			</div>
+			<span class="ml-auto rounded-full bg-primary px-4 py-1 text-xs font-semibold text-primary-foreground">GET</span>
+		</div>
+		if len(e.Project.Screens()) == 0 {
+			<p class="py-8 text-center text-sm text-muted-foreground">Nothing in the set yet.</p>
+		} else {
+			<ol class="flex gap-3 overflow-x-auto pb-2">
+				for _, screen := range e.Project.Screens() {
+					<li class="w-44 shrink-0">
+						@ui.Tile(e, screen, 176, "")
+					</li>
+				}
+			</ol>
+		}
+	</div>
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func initial(name string) string {
+	for _, r := range name {
+		return string(r)
+	}
+	return "?"
+}
+
+// folders is the sentence under the export button, as the server first renders
+// it. forge.js recomputes it from the ticked boxes; this is what it says before
+// anything has been clicked.
+func folders(devices, languages int) string {
+	n := devices * languages
+	if n == 1 {
+		return "1 folder"
+	}
+	return strconv.Itoa(n) + " folders"
+}

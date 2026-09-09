@@ -1,0 +1,1321 @@
+# howl-go — LLM context file
+
+Go + [templ](https://templ.guide) rendering the same components on the server, into static
+files, and inside the browser via WebAssembly. One Go module, no Node, no npm, no client
+framework. Module path: `github.com/mirairoad/howl-go`.
+
+This file describes `main` (post-v0.1.0). Everything under "Added after v0.1.0" at the
+bottom does not exist in the `v0.1.0` tag — check `go.mod` before using it.
+
+**Read this before writing howl-go code.** The conventions are not guessable: Go's
+toolchain forbids the file-naming tricks other frameworks use, so howl-go's answers look
+different on purpose. The reasoning is in `DESIGN-LOG.md`; the reference docs are in
+`www/docs/*.md`.
+
+---
+
+## Mental model
+
+A `templ.Component` is just `Render(ctx, io.Writer)`. It cannot tell what it is being
+written into. That single fact is the whole framework:
+
+| mode | caller | output |
+|---|---|---|
+| cold SSR | `Shell(title, head).Render(WithChildren(ctx, route.Component()), w)` | full HTML document |
+| SPA navigation | `route.Component().Render(ctx, w)` | fragment swapped into `#outlet` |
+| static export | `.Render(ctx, file)` | `.html` on disk |
+| fragment API | `ui.TodoItem(t).Render(ctx, w)` | one `<li>` |
+| wasm | `route.Component().Render(ctx, &sb)` | HTML, in the browser, 0 bytes over the wire |
+
+Components never branch on which one is happening. One switch in `core/app` does, once.
+
+---
+
+## Packages
+
+| Import | What it is |
+|---|---|
+| `core/app` | server runtime: `app.New(Config)`, mux, SSR/SPA switch, static, SSE, export |
+| `core/router` | route model, context accessors, response status, client config. **Leaf — pages import this** |
+| `core/mw` | middleware: `Middleware = func(http.Handler) http.Handler` |
+| `core/console` | `log/slog` handler: tinted columns on a terminal, JSON in a pipe |
+| `core/state` | typed request state on `context.Context`, via generics |
+| `core/signal` | fine-grained reactivity for the browser: signal, computed, effect, watch |
+| `core/dom` | browser API — real under `GOOS=js`, no-ops elsewhere |
+| `core/runtime` | embeds `app.js` + `transitions.css`, served from `/static/` |
+| `core/api` | the typed endpoint layer: `api.Define(api.Spec[Q, B, R]{…})`, plus the generated client's transport |
+| `core/cmd/howl` | `howl dev` (watch/rebuild/reload), `howl check` (conventions, enforced), `howl mcp` (the same as MCP tools) |
+| `core/cmd/fsapis` | endpoint tree → route table + typed client (build time) |
+| `core/cmd/fsroutes` | directory tree → generated route table (build time) |
+| `core/cmd/mddocs` | Markdown → templ pages (build time) |
+| `db` | optional document store: `db.Doc` envelope, filter grammar, `db.Service[T]`. **Not part of `core/`** — nothing in the framework imports it |
+| `db/pg` | Postgres backend: JSONB + promoted generated columns, over `database/sql` |
+| `db/memdb` | the same contract over a map — the test double, and what the conformance suite runs on everywhere |
+
+**Layering rule that matters:** the generated route table lives *inside* the page tree, so
+anything a page imports must be a leaf. Pages may import `core/router`, `core/state`,
+`core/signal`, `core/dom` — **never `core/app`** (it would drag `net/http` into the wasm
+build and risk an import cycle).
+
+---
+
+## Application layout
+
+```
+myapp/
+  main.go                       app.New(...) + API handlers
+  client/
+    pages/
+      app.templ                 document shell — reserved name, never a route
+      layout.templ              wraps its directory and everything below
+      index.templ               /
+      about/index.templ         /about
+      blog/index.templ          /blog
+      blog/article_id.dyn.templ /blog/{article_id}
+      fsroutes_gen.go           GENERATED — never edit
+    public/                     app's own static files, served at /static/
+    ui/                         shared components (leaf package)
+    store/                      domain types + state (leaf, compiles for wasm)
+  wasm/main.go                  optional: the browser renderer (GOOS=js)
+  desktop/main.go               optional: native window — nested module, see below
+```
+
+`client/pages/` is the only special directory. Everything else is ordinary Go packages.
+
+---
+
+## Bootstrap a new app
+
+```bash
+go mod init example.com/myapp
+go get github.com/mirairoad/howl-go@latest
+go get -tool github.com/a-h/templ/cmd/templ@v0.3.1020   # tool directives do NOT propagate
+```
+
+Build pipeline — **always in this order**:
+
+```bash
+go run github.com/mirairoad/howl-go/core/cmd/fsroutes -module example.com/myapp/client/pages
+go tool templ generate
+go build .
+```
+
+`fsroutes` must run before `templ generate`, and both before `go build`. Put them in a
+Makefile; every example in the repo does. `-module` is the *import path* of the page
+directory, not a filesystem path.
+
+### The dev loop
+
+Do not tell people to run `go run .` and rebuild by hand:
+
+```bash
+go run github.com/mirairoad/howl-go/core/cmd/howl dev      # add -pre "…" for a Markdown step
+```
+
+It watches, regenerates, rebuilds, restarts and reloads the browser (~400-550ms
+per save), proxies a stable port in front of the restarting app, keeps the last
+good binary serving when a build fails, and shows the compiler error as an
+overlay in the page. CSS edits skip the rebuild and swap the stylesheet in place.
+
+There is **no HMR** — Go cannot hot-swap a linked binary. Do not claim otherwise.
+
+The app needs no dev-mode code: `app.New` reads `HOWL_ADDR`, `HOWL_PUBLIC_DIR`
+(serve /static/ from disk) and `HOWL_DEV` (publish the live endpoint), all set by
+the dev server and unset otherwise.
+
+Live reload is the `/_howl/alive` SSE stream, same name and pattern as howl (TS):
+it carries a monotonic revision, the client remembers the first and reloads on
+anything higher, so a rebuild missed while disconnected still reloads on
+reconnect. Events: `alive` (revision), `css` (swap stylesheets), `build-error`
+(overlay), `build-ok`. Never name an SSE event `error` — EventSource already
+uses that for connection failures.
+
+Optional wasm renderer:
+
+```bash
+GOOS=js GOARCH=wasm go build -o client/public/views.wasm ./wasm
+install -m 644 "$(go env GOROOT)/lib/wasm/wasm_exec.js" client/public/wasm_exec.js
+```
+
+---
+
+## Routing conventions
+
+Routes come from the directory tree. Behaviour is encoded in **dot-separated suffixes** on
+the file name.
+
+### Reserved basenames (never routes)
+
+| name | meaning |
+|---|---|
+| `app.templ` | the document shell, root of the page tree only |
+| `layout.templ` | wraps its directory and everything below it |
+| `*.component.templ` | colocated markup, never publishes a URL |
+
+### Modifiers
+
+| file | route | meaning |
+|---|---|---|
+| `index.templ` | `/dir` | plain server-rendered route |
+| `index.client.templ` | `/dir` | also rendered in the browser by the wasm build |
+| `article_id.dyn.templ` | `/dir/{article_id}` | path parameter |
+| `article_id.dyn.client.templ` | `/dir/{article_id}` | both, in either order |
+| `print.bare.templ` | `/dir/print` | no layout chain, keeps the document shell |
+| `embed.raw.templ` | `/dir/embed` | no layouts, no shell — the markup is the whole reply |
+
+Directory names take modifiers too: `posts/id.dyn/index.templ` → `/posts/{id}`.
+
+**An unknown modifier is a hard error.** A silently ignored typo is a route that quietly
+loses a capability.
+
+`index` cannot be `.dyn` — name the file after the parameter instead.
+
+### Directives
+
+```go
+//howl:route /custom/path      // override the derived pattern outright
+//howl:data  /api/metrics      // this route's own client-data endpoint (.client routes)
+```
+
+`//howl:data` is what a `.client` route uses to fetch its own payload instead of sharing
+`Config.ClientData` with every other client route. The browser fetches it before rendering
+that route and hands the body to the renderer; a route that declares none falls back to
+`Config.ClientData`. Endpoints are fetched once and cached, so several routes naming the
+same URL cost one request.
+
+Directives attach to the file, not to a Go symbol, so several routes can share a package.
+
+### Why not `_layout` or `[id]`
+
+The Go toolchain refuses both, verified:
+
+| attempted | result |
+|---|---|
+| `_layout.templ` | Go ignores every file/dir starting with `_` → "no Go files in package" |
+| `[article_id].templ` | "invalid input file name" |
+| `[article_id]/` or `{id}/` | "malformed import path: invalid char" |
+| `article_id.dyn.templ` | **works** — dots are legal in file names and import paths |
+
+Never propose bracket or underscore conventions for this framework.
+
+---
+
+## Page anatomy
+
+```templ
+package blog
+
+import "github.com/mirairoad/howl-go/core/router"
+
+// Optional. Merged into <head>. The <title> is extracted and emitted once by the shell.
+templ Head() {
+	<title>Article — myapp</title>
+	<meta name="description" content="…"/>
+}
+
+// The page component: the FIRST zero-argument `templ Name()` in the file that is not
+// Head. Files sharing a directory share a Go package, so give them different names.
+templ Article() {
+	{{ a, ok := store.ArticleByID(router.Param(ctx, "article_id")) }}
+	if ok {
+		<h1>{ a.Title }</h1>
+	} else {
+		{{ router.NotFound(ctx) }}   // the response carries 404, not a soft 200
+		<h1>404</h1>
+	}
+}
+
+// Optional lifecycle, plain Go funcs — NOT templ. Run in the browser only.
+func Mount()   { … }   // after this page's markup is in the DOM; runs in a scope
+func Unmount() { … }   // optional: teardown that is not a registration
+```
+
+Rules:
+
+- `templ` produces markup; `func` does something. `templ Mount()` is impossible — a templ
+  block compiles to a function that writes HTML.
+- Pages take **no arguments**. The generated table needs one uniform signature. Everything
+  reaches them through `ctx`.
+- `Mount`/`Unmount` must not import `syscall/js` — use `core/dom`, which compiles for both
+  targets. A page declaring either automatically requires the wasm binary.
+- `Mount` runs inside a scope. Every effect, watcher and listener it registers is released
+  when the page is swapped out. There is no stop func to keep and no `Unmount` to write for
+  them; `Unmount` is for a timer to cancel or a draft to save.
+
+### Layouts
+
+```templ
+// client/pages/dashboard/layout.templ
+templ Layout() {
+	<nav>
+		for _, r := range router.Children(router.Routes(ctx), "/dashboard") {
+			@ui.Tab(r.Pattern, r.Label)
+		}
+	</nav>
+	{ children... }
+}
+```
+
+The chain is resolved at build time by walking up the tree, so a nested page never imports
+its parent. The component must be named `Layout`.
+
+### The document shell (`client/pages/app.templ`)
+
+```templ
+templ App(title, head string) {
+	<!doctype html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<title>{ title }</title>                                   <!-- exactly ONE -->
+			<link rel="stylesheet" href="/static/app.css"/>
+			@templ.JSONScript("howl-client", router.ClientConfig(ctx)) <!-- what the client needs -->
+			<script src="/static/app.js" type="module"></script>
+			<script src="/static/islands.js" type="module"></script>   <!-- your islands, if any -->
+			<!--page-head-->
+			@templ.Raw(head)
+			<!--/page-head-->
+		</head>
+		<body>
+			<main id="outlet" data-route={ router.Current(ctx) }>{ children... }</main>
+		</body>
+	</html>
+}
+
+templ NotFound(path string) { <h1>404</h1> }
+```
+
+Non-negotiable parts, each for a reason:
+
+| element | why |
+|---|---|
+| `id="outlet"` | the client swaps its `innerHTML`; without it navigation cannot work |
+| `data-route` | the outgoing route's `Unmount` is looked up from it |
+| `<!--page-head-->` markers | page-owned head tags are removed on leaving instead of stacking |
+| a page's own `<link rel="stylesheet">` | loaded *before* the swap, so no frame shows new markup with no page CSS |
+| exactly one `<title>` | two, and the browser keeps the first — the page would lose to the fallback |
+| `howl-client` JSON | which routes need wasm, where its data comes from, and the build id |
+
+Anything **outside** `#outlet` survives navigation (headers, sidebars, islands with state).
+Anything inside is replaced.
+
+---
+
+## `core/router` API
+
+Everything a page or layout can read from `ctx`:
+
+```go
+router.Param(ctx, "article_id") string      // path parameter
+router.Current(ctx) string                  // active path
+router.Routes(ctx) []router.Route           // the whole table
+router.Under(ctx, "/dashboard") bool        // nav highlighting, incl. children
+router.Nav(routes) []Route                  // top-level static routes — derived, not declared
+router.Children(routes, "/dashboard") []Route
+router.Lookup(routes, path) (Route, map[string]string, bool)
+router.NeedsWasm(routes) []string
+router.ClientConfig(ctx) router.Client
+
+router.NotFound(ctx)                        // this response is a 404
+router.SetStatus(ctx, code)                 // any status, from inside a component
+router.Status(ctx) int
+```
+
+Status works because pages render into a buffer before anything is sent. This is also why
+a component that fails halfway produces an error page rather than a truncated document.
+
+`router.Route` fields: `Pattern`, `Label`, `Page`, `Head`, `Mount`, `Unmount`, `Layouts`,
+`Client`, `Raw`, `Data`. All produced by `fsroutes` — never construct one by hand outside tests.
+
+---
+
+## `core/app` API
+
+```go
+a := app.New(app.Config{
+	Routes:   pages.FsClientRoutes(),   // generated
+	Shell:    pages.App,                // func(title, head string) templ.Component
+	NotFound: pages.NotFound,           // func(path string) templ.Component
+	Public:   public,                   // fs.FS — the app's own /static/ files
+	Data:     data,                     // func(ctx, path) ctx — context for every render
+	Addr:     ":9000",
+
+	Use:     []mw.Middleware{…},        // outermost first
+	OnError: func(w, r, err) {…},       // owns the response; nothing written yet
+	Log:     nil,                       // defaults to slog.Default()
+
+	StaticMaxAge:    0,                 // 0 = revalidate with ETag
+	StaticImmutable: app.Hashed,        // app.9f8c2a1b.css → cache a year
+	Dev:             false,             // re-read static files every request
+
+	ClientData: "/api/metrics",         // fallback JSON for client routes; omit = no fetch
+	                                    // per-route: //howl:data in the page file
+	Bootstrap: func(ctx, path) any { … }, // per-request runtime state for wasm renders
+	PublicDir:  "",                     // serve /static/ from disk instead of the embed (dev)
+})
+
+mux := a.Mux()                          // routes + /static/ + 404 fallback
+mux.HandleFunc("GET /api/things", …)    // your own handlers, plain net/http
+a.Mount("/admin", adminHandler)         // sub-app, prefix stripped
+log.Fatal(a.Listen(mux))                // applies Use + logs the startup line
+a.Serve(ln, mux)                        // Listen with the listener already open
+
+a.Handler()                             // Mux wrapped in Use — for tests/custom servers
+a.Wrap(h)                               // apply Use to any handler
+a.Export("./dist")                      // static export of every non-dynamic route
+app.SSE(w, r)                           // (*Stream, error); Send(event, data), Done()
+```
+
+There is **no `ctx` wrapper and no framework handler type**. Use `r.Cookie`,
+`r.URL.Query()`, `r.PathValue`, `json.NewEncoder(w)`. Do not invent `ctx.json` helpers.
+
+---
+
+## `core/mw`
+
+```go
+Use: []mw.Middleware{
+	mw.RequestID,                                              // id on ctx + X-Request-Id
+	mw.LogWith(mw.LogOptions{Callers: true, Skip: mw.SkipNoise}),
+	mw.Recover(nil),                                           // panic → 500
+	mw.Compress{}.Handler,                                     // gzip dynamic responses
+	(&mw.Coalesce{}).Handler,                                  // share one render across identical concurrent GETs
+	mw.CORS{Origins: []string{"https://app.example.com"}}.Handler,
+	mw.CSRF{Secure: true}.Handler,                             // origin check + double-submit token
+	mw.CSP{Policy: "default-src 'self' 'nonce-{nonce}'"}.Handler,
+}
+```
+
+- `mw.Middleware` is `func(http.Handler) http.Handler` — anything written for chi or the
+  standard library drops in, in either direction.
+- Config-struct middleware are used as `Type{…}.Handler`. `Coalesce` needs a pointer
+  (`(&mw.Coalesce{}).Handler`) because it holds state.
+- Read helpers: `mw.ID(ctx)`, `mw.CSRFToken(ctx)`, `mw.Nonce(ctx)`.
+- `Coalesce` refuses to share: non-GET, requests with `Cookie`/`Authorization`, responses
+  that set a cookie, bodies over `MaxBody`.
+- `LogOptions.Callers` adds `ip`/`ua` **only** for requests that did not come from a page
+  on this host (checked via `Sec-Fetch-Site`, `Origin`, `Referer`).
+
+---
+
+## Logging
+
+```go
+console.Setup(console.Options{})   // installs as slog.Default; do this first in main()
+```
+
+```
+09:45:31.924 INFO  listening   url=http://localhost:9000 routes=8
+09:45:33.988 INFO  http        POST /api/logs 202 0B 6.76ms id=b13b1e4b ip=10.1.4.9 ua=otel-collector/0.96
+09:45:34.220 WARN  http        GET /nope 404 1.6kB 45µs id=24ab09a8
+```
+
+Terminal → tinted aligned columns. Pipe/file/systemd → JSON, one object per line. Decided
+by whether stdout is a character device; `NO_COLOR` wins outright. `method`, `path`,
+`status`, `bytes`, `took` render positionally in that order whatever order you pass them.
+
+Log through `slog` (`slog.Info`, or `a.Log()`), not `fmt.Printf`.
+
+---
+
+## `core/state` — typed request state
+
+```go
+type User struct{ ID string }
+
+ctx = state.With(ctx, User{ID: "u_1"})   // middleware or Config.Data
+u := state.Get[User](ctx)                // zero value if absent
+u, ok := state.From[User](ctx)           // when absence matters
+```
+
+The key *is* the type — one value per type. Two things of the same underlying type that
+mean different things need different named types.
+
+---
+
+## `core/signal` — reactivity (browser)
+
+```go
+Todos   = signal.WithEq([]Todo(nil), sameTodos)   // slices/maps: supply equality
+Count   = signal.Of(0)                            // comparable: skips equal writes
+Derived = signal.DeriveEq(func() int { … })       // computed
+signal.Effect(repaint)                            // auto-tracked, no dependency array, no stop func to keep
+signal.Watch(src, func(now, before int) { … })    // fires on a transition, not on registration
+signal.Batch(func() { a.Set(1); b.Set(2) })       // dependents run once, after
+signal.Untrack(func() { … })
+dispose := signal.Scope(func() { … })             // a lifetime that is not a page's
+signal.OnCleanup(fn)                              // run fn when the open scope is disposed
+```
+
+Twelve names, and that is the whole package. `Of`/`New`/`WithEq`, `Get`/`Peek`/`Set`/
+`Update`, `Derive`/`DeriveEq`, `Effect`, `Watch`, `Batch`, `Untrack`, `Scope`, `OnCleanup`.
+
+There is no dependency array because reads are observable: an effect installs itself while
+running and every `Get()` registers the edge. Re-running an effect detaches its old
+dependencies first, so a branch that stops reading a signal stops being woken by it.
+To watch several values, read them all in one `Effect`; there is no `WatchAny`.
+
+Writes are batched. A `Set` queues its dependents and runs them when the outermost write
+returns, so two writes in one handler cost one repaint, a `Set` made inside an effect does
+not recurse, and an effect reading both a signal and a value derived from it runs once per
+change, after the derived value has recomputed. `Batch` widens the window over several
+writes.
+
+Release is automatic inside a scope. The runtime opens one around a page's `Mount` and
+disposes it when the page leaves, so `Effect`, `Watch` and `Derive` created there — and
+every `dom` listener — go with it. The stop func is still returned for code outside a
+scope, where it is the only handle.
+
+Signals are package-level. The server must never write them — mirror into signals only on
+the browser's instance, or concurrent requests race.
+
+This is the API. **The shape a page actually uses it in is "Making a page interactive"
+below** — the store split, the SSR→browser handoff, and the lifecycle contract. Read
+that before writing a reactive page; the API on its own does not imply any of it.
+
+---
+
+## Browser: `core/dom` and `window.howl`
+
+```go
+root := dom.Root()                                          // the element this page rendered into
+root.Delegate("click", "[data-del]", func(e dom.Event) { … }) // one listener, every match, now or after a repaint
+root.Query("[data-form]").On("submit", func(e dom.Event) { … }) // submit and link clicks are prevented for you
+e.Target() / e.Value() / e.Key() / e.PreventDefault()       // what a handler reads
+root.Query("[data-list]").Render(ui.TodoList(items))        // the repaint: a morph — keyed rows move, unchanged nodes stay, focus survives
+dom.Embedded("todos", &sn)                                  // the snapshot the server serialised into this page
+el.Focus()                                                  // keyboard focus — a modal's field on open
+dom.Frame(func(t float64) bool { …; return true })          // once per paint; released with the scope
+dom.Off(release...)                         // outside a scope only — an app-shell control registered at startup
+dom.Navigate("/dashboard")                  // same path a link click takes
+dom.Navigate("/", dom.Replace())            // no new history entry
+dom.Navigate("/x", dom.Transition("slide-left"))
+dom.Prefetch("/reports/2024")
+dom.Log(…) / dom.Warn(…)
+```
+
+`net/http` under `GOOS=js` **is** the browser's `fetch()` — no JS glue needed. It must run
+in a goroutine: blocking the JS callback deadlocks the Go scheduler.
+
+JS side — `window.howl` is the entire public API:
+
+```js
+howl.navigate(url, { replace, transition, scroll, fresh })
+howl.prefetch(url)
+howl.island(name, (el, props) => { … })   // your islands live in YOUR script, not the framework
+howl.config                                // { wasm: [...], data: "..." }
+```
+
+Markup attributes the client runtime understands:
+
+| attribute | effect |
+|---|---|
+| `data-island="name" data-props='{…}'` | hydrated by a registered island |
+| `data-no-prefetch` | do not warm this link (or subtree) |
+| `data-no-spa` | full page load, do not intercept |
+| `data-animate-rows` | on a list: the morph marks inserted rows `data-entering` for a frame and removed rows `data-leaving` until their transition ends; declare the motion in CSS |
+
+Every response carries `X-Howl-Build`, the id of the build that produced it, and the shell
+embeds the same id in `howl-client`. The client compares them on each fragment and data
+response; the first mismatch marks the tab stale and its next navigation is a full document
+load instead of a swap. That is what keeps an open tab from rendering `.client` routes with
+yesterday's wasm after a deploy — and why a rebuild never needs a hard refresh: the wasm URL
+is content-hashed, and the document that names it is `no-cache`. The id is hashed from the
+binary and the wasm, not a start time, so restarting the same build reloads nobody.
+
+`fresh: true` skips the prefetch cache. Use it for the navigation that follows a
+write — re-rendering the page the user is already on. Without it a fragment
+cached less than 15 s ago is served as-is, which for a form → endpoint →
+re-render application means the page shows the state *before* the change and
+then silently corrects itself once the entry ages out.
+
+A `*.raw.templ` route is never intercepted either: it is its own document, so
+swapping it into `#outlet` would dress it in the chrome of whatever page the
+user came from, and a reload would then disagree with the navigation that got
+there. The client reads the patterns from `router.Client.Raw` and hands them to
+the browser.
+
+Nothing outside `#outlet` is re-rendered by a navigation, so a script that
+paints persistent chrome listens for the event:
+
+```js
+document.addEventListener("howl:navigate", (e) => {
+  // e.detail.path is the new route, e.detail.url the full target
+});
+```
+
+It fires after the markup is in the DOM and after the page's `Mount`.
+| `data-transition-slide-left` etc. | view transition; on `<html>` for a default, `data-transition-none` opts out |
+
+`prefers-reduced-motion` disables transitions outright. Transitions are opt-in — nothing
+animates unless declared.
+
+---
+
+## Making a page interactive
+
+Three mechanisms, and picking the wrong one is most of the mess. Decide by what
+the state *is*, not by how interactive the page feels:
+
+| the state is | use | cost |
+|---|---|---|
+| nothing — a form that posts and re-renders | plain `<form method="post">`, an endpoint, a redirect | 0 |
+| local to one widget, and JS-shaped (a dropdown, a filter, a sort) | an **island**: `data-island="name"` + `howl.island(name, setup)` in your own JS | a few lines of vanilla |
+| domain state the server also owns, mutated by the user, rendered by real components | a **`.client` page + a store + signals** | the wasm binary, 1.71 MB gzipped, lazy-loaded |
+
+Do not reach for the third one because a value changes on screen. Reach for it
+when the *same rules* have to run on the server and in the browser, and you do
+not want two implementations of them.
+
+### The store: two files, two different rules
+
+```
+client/store/todos.go          domain — compiles for the server AND GOOS=js
+client/store/todos_client.go   signals — package-level, therefore browser-only
+```
+
+`todos.go` holds the types, the mutation methods, `Snapshot` (the wire format)
+and `Op` (one mutation), plus the `WithTodos`/`TodosFrom` context pair the SSR
+render reads. Nothing server-shaped may enter it — `net/http`, `database/sql`,
+`os` — because pages import it and pages compile to wasm.
+
+`todos_client.go` holds the signals and one gate:
+
+```go
+var todoClient = NewTodoStore()
+
+var (
+	Todos     = signal.WithEq([]Todo(nil), sameTodos)   // slices need an equality func
+	TodoCount = signal.DeriveEq(func() int { return len(Todos.Get()) })
+)
+
+// Only the browser's instance publishes. The server's store is a different
+// pointer, so concurrent requests never write these package-level variables.
+func (s *TodoStore) publish() {
+	if s == todoClient {
+		Todos.Set(s.List())
+	}
+}
+```
+
+**The server must never write a signal.** Signals are package-level; a request
+handler setting one is two requests writing one variable. `howl check` reports
+server code importing `core/signal`.
+
+Scaffold both files with `howl_scaffold` (`kind: "store"`, `name: "todos"`).
+
+### The three wires, in the order they run
+
+1. **SSR.** `Config.Data` puts the data on the context; the page renders from
+   `store.TodosFrom(ctx)`. This is the paint the user sees first, and it happens
+   with no JavaScript at all.
+2. **Hydrate.** The page serialises the snapshot it rendered from into its own
+   markup — `@templ.JSONScript("todos", store.SnapshotFrom(ctx))` — and `Mount`
+   reads it back with `dom.Embedded("todos", &sn)` and calls `Restore`, which
+   publishes to the signal. No request: the browser store starts with exactly
+   what is on screen, on a cold load and after a navigation alike. This is
+   mandatory for a store page; `howl check` warns on a `Restore` with no
+   `Embedded`.
+3. **Local.** A mutation calls `store.Commit(op, send)`: `Apply` runs now, which
+   publishes, which wakes the effect, which re-renders **the same templ component
+   the server used** and swaps it in. `send` tells the server from a goroutine and
+   never blocks the user; one sender goroutine sends in commit order. If the server
+   refuses (`api.Refused`, a 4xx) the store rolls that one op back — the confirmed
+   snapshot plus the ops still waiting — and sets `store.Rejected`. If the server is
+   unreachable nothing is dropped: `store.Offline` goes true, `store.Queued` counts
+   the wait, and the sender retries with backoff until the op lands. The page shows
+   both in their own elements. `Mount` hydrates with `Hydrate(sn)` so there is a
+   confirmed state to return to, with queued ops replayed on top.
+
+### The lifecycle contract
+
+```go
+func Mount() {
+	root := dom.Root()
+	var sn store.Snapshot
+	if err := dom.Embedded("todos", &sn); err == nil {
+		store.TodosClient().Restore(sn) // the server's snapshot, from the page; no fetch
+	}
+	root.Delegate("click", "[data-add]", func(dom.Event) {
+		store.TodosClient().Apply(store.TodoOp{Kind: "add", Text: "…"})
+	})
+	root.Delegate("click", "[data-del]", func(e dom.Event) { del(e.Target().Attr("data-del")) })
+	root.Query("[data-form]").On("submit", func(e dom.Event) { add(e.Target().Query("input").Value()) })
+	signal.Effect(repaint)
+	signal.Watch(store.TodoCount.Get, onCount)
+}
+
+func repaint() {
+	items := store.Todos.Get()   // through the SIGNAL — that is what registers the dependency
+	dom.Root().Query("[data-list]").Render(ui.TodoList(items))
+}
+```
+
+No `Unmount`, no release slice, no rebinding. `Mount` runs in a scope the runtime disposes
+when the page is swapped out; `Delegate` puts one listener on the root that matches rows a
+later repaint renders; `Render` is the same component the server used, rendered again into
+the same element, and a no-op once that element is gone.
+
+Rules, each of which fails silently when broken:
+
+- **Read through the signal, not the store.** `store.Todos.Get()` registers the
+  effect as a dependent; `store.TodosClient().List()` returns the same data and
+  subscribes to nothing, so the page simply stops updating.
+- **State is a signal; only effects write the DOM.** A handler writes a signal.
+  An effect reads it and touches the element. A handler that also writes the
+  DOM is overwritten by the next effect run, and a `bool` in a Go var that a
+  click flips is observed by nothing. A modal is one signal (the id being
+  edited, or open/closed) and one effect that toggles `hidden`, fills the
+  field and focuses it — `howl_frontend topic="modal"` has it whole.
+- **Register in `Mount`, not in a goroutine.** The scope is lexical: it closes
+  when `Mount` returns. A goroutine that starts there finishes later, so an
+  effect or a listener it registers is outside the scope and lives for the tab.
+  Goroutines write signals; the effects registered in `Mount` react.
+- **Delegate on anything a repaint replaces.** `On` binds to one node, and
+  `Render` throws that node away. `Delegate` on the root survives every
+  repaint. `howl check` warns on a listener bound per row inside a loop.
+- **Fetch in a goroutine.** Blocking the JS callback deadlocks the Go scheduler:
+  the fetch can only resolve once control returns to the event loop.
+- **`Unmount` is for what is not a registration.** A timer to cancel, a draft to
+  save. Writing one to release effects and listeners is ceremony the scope
+  already did.
+
+Scaffold the whole thing with `howl_scaffold` (`kind: "page"`, `client: true`,
+`store: "todos"`) — it writes the page, the embedded snapshot on both sides, the
+delegated listener, the effect and the one-line repaint, wired to a store that
+exists.
+
+The recipes — page, store, events, list, form, **modal**, filter, navigation,
+animation, islands — are the `howl_frontend` MCP tool and `www/docs/11-frontend.md`,
+each as When / Rules / Example / Wrong / Check. Call `howl_frontend topic="checklist"`
+before writing anything that runs in the browser.
+
+### Overlays, and the cost of markup nobody sees
+
+Build a modal or a drawer from a checkbox and a sibling selector, not
+`<dialog>.showModal()`:
+
+```html
+<input id="panel" type="checkbox" class="peer sr-only"/>
+<label for="panel">Open</label>
+<div class="hidden peer-checked:grid …">
+  <label for="panel" class="absolute inset-0 …"></label>  <!-- backdrop closes it -->
+  …
+</div>
+```
+
+No JavaScript, keyboard-operable, and nothing to re-hydrate after a navigation —
+the same reason a page's disclosure should be `<details>`.
+
+**Then gate whatever fills it.** This is the part that bites, and it is a
+consequence of the framework's own shape: there is no component tree, so an
+application script finds its work by asking whether the markup is there —
+`if (qs("[data-rows]")) refreshRows()`. A closed panel is `display:none`, and
+`display:none` markup **is still there**. So a panel nobody has opened keeps
+answering yes, and a script on a timer rebuilds it forever, at full cost, for
+nobody. A framework with a virtual DOM would have told the script the panel was
+not mounted. Nothing here will.
+
+```js
+const open = () => { const t = document.getElementById("panel"); return !t || t.checked; };
+
+if (open()) host.replaceChildren(...rows.map(render));   // skip the work when shut
+document.addEventListener("change", (e) => {             // ...and never show it stale
+  if (e.target.id === "panel" && e.target.checked) draw();
+});
+```
+
+`!t || t.checked` matters: a page with no panel is one where that markup *is*
+the page, and it must always draw.
+
+Measured, in an application that got this wrong: one editable row per machine,
+each a few hundred lines of markup, rebuilt every 3 s into a shut dialog. It read
+as the whole page being slow, because it was — the work was invisible, not the
+symptom.
+
+Two smaller ones: do not put `backdrop-filter` on a full-viewport backdrop over
+a page with anything animating behind it, and remember that a `required` field
+inside a hidden step is a field the browser will refuse to focus and refuse to
+explain.
+
+### What does not exist
+
+No hooks, no re-render, no virtual DOM, no dependency array, no `useState`. A
+component renders once to a writer and is finished; "update the screen" means
+render it again and swap the result in — which is why `repaint` is two lines
+and why the markup is identical to the server's. The swap is a morph, done by
+`app.js`: an element with a `data-key` or an `id` is moved rather than rebuilt,
+an unchanged node stays the same node, and the field being typed into keeps its
+value and focus. Give rows a `data-key`. There is still no state above the DOM:
+a listener bound with `On` to a node the morph replaced is gone, which is what
+`Delegate` is for.
+
+---
+
+## Client render safety
+
+A `.client.templ` route is compiled into two different Go binaries. The server
+binary and `views.wasm` each have their own package globals, environment,
+startup time and build metadata. A component that calls `build.Tag()`,
+`os.Getenv`, `time.Now` or `runtime.Version` can therefore render one value on
+the cold request and another after local navigation without either build
+failing.
+
+The rule is:
+
+> Client-renderable components may only depend on route parameters, explicit
+> route data, and hydrated application state.
+
+This includes every layout and shared UI component reachable from a `.client`
+route. Compile-time constants are safe. Runtime values—running version, viewer,
+permissions, settings and feature flags—come from `Config.Bootstrap`:
+
+```go
+type AppState struct {
+	Version string `json:"version"`
+	Viewer  Viewer `json:"viewer"`
+}
+
+a := app.New(app.Config{
+	Data: func(ctx context.Context, path string) context.Context {
+		return state.With(ctx, AppState{Version: build.Tag(), Viewer: viewer(ctx)})
+	},
+	Bootstrap: func(ctx context.Context, path string) any {
+		return state.Get[AppState](ctx)
+	},
+})
+```
+
+The shell already serializes `router.ClientConfig(ctx)` as `howl-client`, so the
+bootstrap value is emitted safely with the rest of that JSON and retained for
+local navigations. `app.js` hands the wasm renderer one envelope:
+
+```go
+type RenderPayload struct {
+	Bootstrap json.RawMessage `json:"bootstrap"`
+	RouteData json.RawMessage `json:"routeData"`
+}
+
+payload, err := router.DecodeRenderPayload(args[1].String())
+ctx, err = state.Hydrate[AppState](ctx, payload.Bootstrap)
+```
+
+Route data remains separate: decode `payload.RouteData` as the type belonging
+to that route. Bootstrap is evaluated per request and sent to the browser; do
+not put secrets in it.
+
+Mark packages that must never enter a browser-renderable dependency graph with
+`//howl:server`. Prefer `//go:build !js` when the entire package is genuinely
+unavailable under wasm, because then an accidental import also fails the Go
+build. `howl check` traces client routes through layouts and module-local
+imports, rejects those packages, and reports direct uses of `os.Getenv`,
+`time.Now` and `runtime.Version` in client-renderable templates.
+
+---
+
+## The wasm renderer
+
+`wasm/main.go` (build tag `//go:build js && wasm`) imports the **same** generated route
+table and exports three functions:
+
+```go
+js.Global().Set("howlRender", js.FuncOf(render))   // (path, renderPayloadJSON) -> html or ""
+js.Global().Set("howlMount", js.FuncOf(mount))     // (path, element)
+js.Global().Set("howlUnmount", js.FuncOf(unmount)) // (path)
+select {}                                          // main must never return
+```
+
+`render`'s second argument is `router.RenderPayload`: per-request `Config.Bootstrap` plus
+the payload for *that* route — its `//howl:data` endpoint if it declared one, otherwise
+`Config.ClientData`. A renderer may decode a different route-data type per route while
+installing the same application state for all of them. `render` returns `""` for a route
+that is not `.client`, and the client falls back to the server. Its output must start with the same `<template data-head><title>…</title>…</template>`
+prefix the server sends — one wire shape, one merge path.
+
+Cost: ~6.1 MB raw / 1.71 MB gzipped — `examples/toy_app`, at the
+`gzip.BestCompression` level `core/app/static.go` serves at. For scale, React
+19's production client runtime is 99.2 kB gzipped and Vue 3.5's is 40.0 kB, both
+before any application code. Lazy-loaded only for routes in `howl.config.wasm`.
+Do not put it on the critical path of a public page.
+
+---
+
+## Endpoints
+
+One file per endpoint under `server/apis/`. The file's location is its URL, the
+file name carries the method, and the Go types are the contract — there is no
+schema library, because the types the handler is written against ARE the schema.
+
+```go
+// server/apis/settings/purge.post.api.go  ->  POST /api/settings/purge
+package settings
+
+type Purged struct {
+	Removed int64 `json:"removed"`
+}
+
+var Purge = api.Define(api.Spec[api.None, api.None, Purged]{
+	Name:  "Purge",
+	Roles: []string{"admin"},          // strings; the application decides what they mean
+	Handler: func(r *api.Request[api.None, api.None]) (Purged, error) {
+		removed, err := store.Get().Purge()
+		return Purged{Removed: removed}, err
+	},
+})
+```
+
+| file | route |
+|---|---|
+| `summary.api.go` | `GET /api/summary` |
+| `settings/index.api.go` | `GET /api/settings` |
+| `settings/index.put.api.go` | `PUT /api/settings` |
+| `events/id.dyn.api.go` | `GET /api/events/{id}` |
+| `health.api.go` with `Path: "/healthz"` | `GET /healthz` |
+
+Rules:
+
+- **One `api.Define` per file.** The file name is the URL; it can only describe one.
+- `api.None` for no query, no body, or no response (a `None` response answers 204).
+- Query decoding uses `query:"name"` tags. Body is JSON, and unknown fields are rejected.
+- Validation is a `Validate() error` method on the query or body type. It runs before the
+  handler; a plain error becomes a 400.
+- Return `*api.Error` (`api.NotFound`, `api.Invalid`, `api.Forbidden`, …) to choose a status.
+  Any other error is a 500 whose details stay server-side, with a correlation id on both.
+- A response type may implement `Status() int` for 201/202.
+- **Roles are not implemented by howl-go.** The endpoint declares strings; the application
+  supplies `api.Config{Authorize: func(*http.Request, []string) error}`. Declaring roles
+  with no Authorize wired panics at registration — it would otherwise let everyone through.
+- Generate with `fsapis`, register with `api.Register(mux, cfg, apis.FsApiRoutes()...)`.
+- Protobuf, file serving and streaming stay ordinary `http.Handler`s on the mux.
+
+The OpenAPI document is built at startup from the same table, so it cannot
+describe an endpoint the binary does not serve:
+
+```go
+routes := apis.FsApiRoutes()
+api.Register(mux, cfg, routes...)
+mux.HandleFunc("GET /api/openapi.json", api.OpenAPI(api.Info{Title: "Guard"}, routes...))
+mux.HandleFunc("GET /api/docs", api.Docs("/api/openapi.json"))
+```
+
+Query tags become parameters, `{placeholders}` become path parameters, named
+structs become components, `Roles` becomes a security requirement. `Validate()`
+is deliberately NOT expressed — it is arbitrary Go, and a `maximum: 100` the
+handler does not enforce would be worse than silence.
+
+`fsapis -client` also emits a typed client over the same types, which compiles for wasm:
+
+```go
+events, err := api.New("").Events(ctx, telemetry.Filter{Signal: "logs", Limit: 50})
+```
+
+## The document store (`db`)
+
+Optional, separate from the framework, and imported by nothing in `core/`. A collection is
+a struct embedding `db.Doc`; there is no schema library, because the struct is the schema.
+
+```go
+type User struct {
+	db.Doc                        // id (UUIDv7), version, meta{created,updated,deleted}
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+func (u *User) Defaults()      { … }   // optional, on create, before validation
+func (u *User) Validate() error { … }  // optional, on create and every patch -> db.ErrInvalid
+
+var Users = must(pg.New[User](ctx, conn, pg.Options{
+	Collection: "users",
+	Unique:     []string{"email"},
+	Promote:    []pg.Promote{{Path: "plan"}, {Path: "seats", Type: pg.Bigint}},
+}))
+```
+
+```go
+u, err := Users.Create(ctx, User{…}, db.By(actor))
+u, err := Users.Get(ctx, id)                                   // db.ErrNotFound
+u, err := Users.Patch(ctx, id, func(u *User) { u.Name = "…" })  // closure, not Partial<T>
+u, err := Users.PatchFields(ctx, id, db.Set{"profile.plan": "pro"})
+err     := Users.Delete(ctx, id)                                // soft; db.Hard() removes the row
+xs, err := Users.Find(ctx, db.Query{Where: db.And(db.Eq("plan","pro"), db.Gte("seats",2)),
+                                     Sort: db.Desc("meta.created_at"), Limit: 20})
+n, err  := Users.PatchWhere(ctx, db.Eq("org_id", org), db.Set{"plan": "pro"})
+```
+
+Rules that are not guessable:
+
+- **Soft delete is the default.** Every read carries `meta.deleted_at IS NULL`; `db.Deleted()`
+  lifts it, `db.Hard()` removes the row. A delete does not bump `version`.
+- **`Patch` takes a closure**, and it may run more than once — the service reads, applies it,
+  validates, and writes under an optimistic lock on the version it read, retrying from the
+  fresh document on a lost race. Keep the closure a pure edit.
+- **Errors are sentinels**: `db.ErrNotFound` → 404, `db.ErrConflict` → 409, `db.ErrInvalid` → 400.
+  That mapping is the only glue an `api.Spec` handler needs; the document is the response type.
+- **The filter grammar is small on purpose** — `$eq $ne $in $nin $gt $gte $lt $lte $or $and
+  $exists` + dot-paths, spelled `db.Eq("plan","pro")` or `db.M{"plan":"pro"}`. Anything richer
+  goes through `SQL()`, uncached. A comparison against `nil` matches a stored null *and* an
+  absent key.
+- **No migrations.** The table is `id TEXT PRIMARY KEY, doc JSONB` plus a generated column per
+  `Promote` entry, so adding a Go field changes no DDL. `Report()` names the fields old
+  documents lack and the stored fields the struct no longer declares; `Backfill` and
+  `DropField` clear them.
+- **Options are variadic for id-addressed operations** (`db.By`, `db.Hard()`, `db.Deleted()`,
+  `db.Session(tx)`) and a `db.Query` struct for anything with a filter.
+- **Projection cannot return a partial struct.** Unselected fields come back zeroed, and a
+  projected document is never cached under its id.
+- **No driver dependency.** `pg` takes anything with `QueryContext`/`ExecContext` — `*sql.DB`,
+  `*sql.Tx`. The live Postgres suite is its own module (`db/pg/livetest`) to keep it that way.
+
+- **A page may not import `db`** — same rule as `core/app`, and `howl check` enforces it.
+  Load documents in an endpoint or `Config.Data` and hand them to the page through `ctx`.
+- **`Defaults` must be on the pointer receiver.** On a value receiver it still satisfies
+  the interface, the service still calls it, and every default is written to a copy and
+  lost. `howl check` reports it; `howl_scaffold` gets it right.
+
+Test against `db/memdb`, which is the same contract over a map. Both backends run
+`db/conformance`. Scaffold a new one with `howl_scaffold` (`kind: "collection"`,
+`name: "users"`, `fields: ["email:string"]`) — nothing generates from `server/store/`,
+so the location is convention, not machinery.
+
+## Native window (`desktop`)
+
+The same application in an OS-native window instead of a browser — WKWebView on macOS,
+WebKitGTK on Linux. No bundled runtime and no second language: the window is a C++ shim
+over a webview the OS already ships, and the server is the same `*app.App` this binary
+would otherwise `Listen` with, on a loopback socket nothing else can reach.
+
+```go
+// main.go of the desktop binary — the whole of it
+a, mux := boot.New()                       // the same app.New(...) the server uses
+if err := desktop.Run(a, mux, desktop.Options{
+	Title:     "myapp",
+	Width:     1180,
+	Height:    820,
+	MinWidth:  720,                        // without one the window drags to nothing
+	MinHeight: 520,
+	Attach:    *attach,                    // "" = own loopback server; ":9000" = howl dev
+	Debug:     *debug,                     // inspector + right-click menu
+}); err != nil {
+	log.Fatal(err)
+}
+```
+
+`desktop.Run` blocks until the window closes and is the last line of `main`, like `a.Listen`
+— but **not `log.Fatal(desktop.Run(...))`**: closing a window is how the user quits, so it
+returns `nil` there, and the `a.Listen` idiom would print `<nil>` and exit 1. With `Attach` empty it binds `127.0.0.1:0` — the kernel picks the port and
+the window is the only thing that ever learns it, so a second instance cannot collide and
+no other process on the machine can reach the app.
+
+### It is a separate module
+
+`github.com/mirairoad/howl-go/desktop` has its own `go.mod`. It needs cgo and a webview
+binding; the framework's `go.mod` has one dependency and keeps it. Nothing under `core/`
+imports this — an application opts in from its own main, and the desktop binary is a
+nested module too (`replace` back to the app, same shape as `db/pg/livetest`).
+
+### The dev loop is the reason for `Attach`
+
+```bash
+howl dev -dir . -addr :9000 &      # rebuilds and restarts the server on save
+./myapp_desktop -attach :9000      # attaches to the front door, once
+```
+
+`howl dev` keeps its proxy port up across restarts, so the window connects once and the
+dev client reloads the content in place on every rebuild. **Do not run the desktop binary
+as `howl dev`'s child** — dev restarts what it builds, and that would kill and respawn the
+window on every save.
+
+`desktop.Run` waits for the address to answer before opening. Without the wait a window
+started next to `howl dev` races the first build and lands on connection-refused — a page
+no rebuild can reload, because the dev client that would have reloaded it was never served.
+
+### `a.Serve` — the listener you opened yourself
+
+```go
+ln, _ := net.Listen("tcp", "127.0.0.1:0")
+a.Serve(ln, mux)                       // Listen, minus opening the socket and minus the
+                                       // startup line: only the caller knows an address
+```
+
+`a.Listen` is now `net.Listen` + `a.Serve`. Same middleware chain, same static warming.
+
+### `go:embed` cannot reach `..`
+
+Two binaries now need `client/public`, and the embed cannot live in either main. Put it one
+directory above the files, in `client/assets.go`:
+
+```go
+package client
+
+//go:embed public
+var publicFS embed.FS
+
+func Public() fs.FS { sub, _ := fs.Sub(publicFS, "public"); return sub }
+```
+
+For the same reason, the `app.Config` itself moves out of `main.go` into a `boot` package
+both mains import. The server main keeps only flags and `a.Listen`.
+
+### Sizing
+
+`Width`/`Height` are the opening size, `MinWidth`/`MinHeight` the floor, `MaxWidth`/
+`MaxHeight` the ceiling, `Fixed` forbids resizing outright. Bounds are applied before the
+size, so a `Width` under `MinWidth` lands clamped into a window the user can still drag.
+
+Set a minimum. Nothing else stops the window resizing to nothing, and a layout that reflows
+correctly at every width still has a width below which it stops reflowing and starts
+clipping. Leave the maximum at zero unless you mean it: a window that refuses to fill the
+screen it was dragged onto is worse than content that centres itself.
+
+Beyond that, adapting is the stylesheet's job and nothing about it is desktop-specific —
+the window is the viewport, there is no browser chrome to subtract, and WKWebView and
+WebKitGTK both hand the page a correct `devicePixelRatio` on a HiDPI display. Intrinsic
+rules carry a window better than breakpoints do, because a window is dragged through every
+width in between: the toy app's card grid is `repeat(auto-fit, minmax(210px, 1fr))` and
+reflows on its own, with no `@media` anywhere in its 176 lines.
+
+### Packaging: `howl package`
+
+A bare binary runs. What it does not have is the metadata that makes the OS treat it as an
+application — so it shows a blank sheet of paper in the Dock, and on Linux it is not in the
+launcher at all. `howl package` writes that, and only that:
+
+```bash
+go build -o myapp_desktop ./desktop           # this is still what builds
+howl package -bin ./myapp_desktop -name "My App" -id com.example.myapp -version 1.2.0
+```
+
+```
+dist/My App.app/          darwin  Info.plist, PkgInfo, MacOS/<binary>, Resources/AppIcon.icns
+dist/my-app/              linux   binary, my-app.desktop, icons/hicolor/**, install.sh
+```
+
+It does not build, and it does not cross-compile: the desktop binary needs cgo and the
+platform's webview, so build and package the Linux one on Linux. Passing a Mach-O binary
+with `-os linux` is refused rather than wrapped — the mistake otherwise produces a tree that
+installs, appears in the launcher with the right icon, and does nothing when clicked.
+
+**The only required asset is `desktop/packaging/icon.png`** — one square PNG, 1024×1024.
+Every size in both bundles is derived from it, in pure Go: no `iconutil` and no `sips`, so a
+`.app` can be assembled anywhere. Flags carry what changes per release, because that already
+lives in the caller's Makefile; the folder carries what does not, because a file location is
+how the rest of this framework holds configuration.
+
+The escape hatch is a file, not a flag. Drop an `Info.plist` or an `app.desktop` into
+`desktop/packaging/` and it is copied verbatim — that is the answer to
+`LSMinimumSystemVersion`, URL schemes, document types and MIME associations, none of which
+have flags and none of which should.
+
+Four things about the output are worth knowing before changing it:
+
+- `-id` is what Launch Services keys its icon and permission caches on. Changing it after a
+  build has been installed anywhere leaves a ghost that still claims the old icon. It
+  defaults to a reverse-DNS form of the module path and is printed on every run for that
+  reason.
+- The `.icns`'s 16px and 32px entries are `ic04`/`ic05` carrying raw **ARGB**, not PNG. The
+  `icp4`/`icp5` slots that look like the obvious home for a small PNG are read as JPEG 2000,
+  and a PNG written there produces a file that `iconutil` itself decodes into noise. This is
+  checked against `iconutil`'s own output, not inferred.
+- The `.desktop` entry's `StartupWMClass` must be the **executable's** base name, not the
+  slug: GTK sets `WM_CLASS` from the program name, and without a match the taskbar shows a
+  second, iconless item beside the pinned one.
+- `install.sh` rewrites `Exec=` to the absolute installed path. A `.desktop` launched from
+  the app grid does not inherit the login shell's `PATH`, so a bare name works from a
+  terminal and fails from the launcher.
+
+Unsigned bundles are what this produces. On macOS the first launch needs right-click ▸ Open;
+signing and notarisation are Apple's tooling and are not wrapped here.
+
+### What it costs, and what it does not have
+
+The toy app's window binary is **17 MB** — one file, including the 7 MB wasm renderer.
+Keep the wasm: over loopback its download is free, and dropping it would mean full document
+loads on every navigation, which is exactly the signal state `.client` routes exist to keep.
+
+- macOS: WKWebView is in the OS. A bare binary works — webview sets the activation policy
+  itself, which non-bundled processes otherwise default to *prohibited*.
+- Linux: `libwebkit2gtk-4.1` is a runtime dependency. The binary is not fully static.
+- Windows: not wired up here.
+
+The binding creates no menu bar, so `desktop` installs one: an app menu, Edit and Window,
+with the standard key equivalents. It is not decoration. On macOS ⌘Q, ⌘W, ⌘M and — the one
+that gets reported as "the text fields are broken" — ⌘C, ⌘V, ⌘X and ⌘A are *menu item*
+behaviour, not window behaviour, so with zero `NSMenu` none of them do anything anywhere in
+the page. `Options.NoMenu` turns it off, for an application installing its own.
+
+There is deliberately no "leave an existing menu alone" guard: a **bundled** app is handed a
+one-item `mainMenu` by AppKit before any of our code runs, so such a guard fires every time
+and the menu reverts to that stub. The symptom is a menu that is correct when the binary is
+run bare and gone once it is inside a `.app`.
+
+Off by default and not worth re-deriving: the inspector (only when `Debug`), the webview's
+own right-click menu (Reload/Back/Forward — browser affordances in something that is not a
+browser), and dropped-file navigation, which would otherwise turn the app into a `file://`
+viewer with no address bar to get back from.
+
+Do not invent: `howl desktop` (there is still no build verb — `go build` builds), an
+AppImage or `.dmg` builder, code signing or notarisation, a tray icon, auto-update, or a
+frameless window. None of it exists. Bundling a `.app` *does* — see below.
+
+---
+
+## Tooling for agents
+
+```bash
+go run github.com/mirairoad/howl-go/core/cmd/howl check          # conventions, enforced
+go run github.com/mirairoad/howl-go/core/cmd/howl check -json    # structured diagnostics
+```
+
+`howl dev` also serves a **routes widget** — draggable, persisted, `⌃R` to toggle
+— listing every route from the generated table, one click to navigate, with a
+box for the parameter on a `.dyn` route. It lives in the dev client, so a
+production build has neither the panel nor the `/_howl/routes.json` it reads.
+
+`check` reports what this file describes: a page importing `core/app` **or `db`**,
+a listener bound per row inside a repaint loop where one `Delegate` would do,
+a store restored from a fetch when the page could embed the snapshot it rendered from,
+server code importing `core/signal`, a store importing something that cannot compile for wasm,
+a `@pkg.Component()` that names something the package does not declare (with a
+did-you-mean), one called with the wrong number of arguments, one that is not
+exported — reported at the line in the `.templ` file, because templ emits no
+`//line` directives and the compiler would otherwise name a generated file,
+and — as warnings, because they are judgement calls — cost put in the wrong
+place: a regexp compiled per call instead of once at package level, a string
+built with `+=` in a loop, an HTTP request or a `db` query per iteration, a
+`defer` inside a loop. These reach `.templ` files too: the templ blocks are
+blanked and the Go around them is parsed at its original lines, which is where
+`Mount` and `repaint` live,
+`templ Mount()`, a shell missing `#outlet` / `data-route` / the page-head markers / the
+client config, an endpoint reading the raw query instead of its declared one, two
+endpoints in one file, roles with no Authorize, a collection whose `Defaults` is on a
+value receiver (it satisfies the interface, mutates a copy, and loses every default),
+hand-edited generated files. With `-build` it also runs `go generate`, `go build` and
+`go vet`.
+
+The same checks are MCP tools — `howl_frontend` (the browser recipes, by topic),
+`howl_conventions`, `howl_check`, `howl_routes`, `howl_endpoints`, `howl_scaffold` —
+served over stdio by `howl mcp`, configured in
+`.mcp.json` at the project root. `howl_scaffold` takes `kind: "page" | "endpoint" | "store" |
+"collection"`; the store kind writes the reactive store — the domain half that compiles for
+wasm and the signals half that does not — and a page with `client: true, store: "todos"`
+comes out already wired to it, with `Mount`, a delegated listener, the effect and a one-line repaint, and with `modal: true` an edit modal on one signal and one effect; the collection kind writes `server/store/<table>.go` with the envelope
+embedded and the pointer-receiver `Defaults` already correct, and its output is
+gofmt-clean. Prefer `howl_routes` / `howl_endpoints` over guessing what
+a URL maps to: they read the generated tables, so they answer with what the project
+actually serves.
+
+## Common tasks
+
+| task | do this |
+|---|---|
+| add a page | create `client/pages/x/index.templ`, re-run `fsroutes` + `templ generate` |
+| add a parameter | `client/pages/blog/article_id.dyn.templ`, read `router.Param(ctx, "article_id")` |
+| 404 from a page | `{{ router.NotFound(ctx) }}` inside the branch that has nothing to show |
+| add an API endpoint | a `*.api.go` file under `server/apis/`; run `fsapis`; register the generated table |
+| add a raw/protobuf/streaming endpoint | `mux.HandleFunc("POST /v1/x", …)` on the mux from `a.Mux()` |
+| return HTML from an API | render a component to the writer: `ui.TodoItem(t).Render(r.Context(), w)` |
+| share data with every page | `Config.Data`, or `state.With` in middleware |
+| add interactivity | pick from the table in "Making a page interactive" — form, island, or `.client` + store |
+| make a page reactive | `howl_scaffold` `kind:"store"`, then `kind:"page"` with `client:true, store:"todos"` |
+| share reactive state between pages | put the signal in `client/store`, never in the page package |
+| render a route in the browser | rename to `*.client.templ`, build the wasm binary |
+| skip the layout chain | `*.bare.templ` |
+| return a bare fragment | `*.raw.templ` |
+| static site | `a.Export("./dist")` — dynamic routes are skipped |
+| store documents | a struct embedding `db.Doc`, then `pg.New[T](ctx, conn, pg.Options{…})` |
+| add a field to a collection | add the Go field. No migration; `Report`/`Backfill` cover the old documents |
+
+---
+
+## Hard constraints and gotchas
+
+1. **Never edit `fsroutes_gen.go`** or `*_templ.go`. They are generated; edit the source
+   and re-run the pipeline.
+2. **Never `_name` or `[name]`** in the page tree. Go rejects both. Use dot modifiers.
+3. **Pages must not import `core/app`** — cycle risk and it drags `net/http` into wasm.
+4. **`templ Mount()` does not exist.** Lifecycle hooks are plain `func`s.
+5. **One `<title>` per document.** The shell owns it; the page supplies it through `Head`.
+6. **`GET /` is ServeMux's catch-all.** The root route registers `GET /{$}`; the 404
+   fallback owns `/` for every method. Do not register `GET /` yourself.
+7. **Register in `Mount`, not in a goroutine it starts.** The scope that releases
+   everything closes when `Mount` returns; a registration made later lives for the tab.
+8. **Read reactive state through the signal, not the store.** `Todos.Get()` subscribes;
+   `Client().List()` returns the same data and subscribes to nothing.
+9. **A `switch` with a `default:` arm is not a router** — it makes every typo a 200.
+10. **`//go:embed` bakes `app.js` into the binary**; editing it does nothing until rebuild.
+14. **Mutations go through `Commit`, not `Apply` + a goroutine that logs.** A refused
+    op the page keeps showing is state that never happened. `Commit` rolls it back and
+    sets `Rejected`; the page shows it.
+12. **A store page embeds its snapshot.** `@templ.JSONScript("todos", store.SnapshotFrom(ctx))`
+    in the markup, `dom.Embedded("todos", &sn)` + `Restore(sn)` in `Mount`. Fetching what
+    the server just rendered from is a request, a flash, and a `howl check` warning.
+13. **A modal is one signal and one effect.** Every way in and out writes the signal;
+    the effect toggles `hidden`, fills the field, focuses. Never `showModal`, never a
+    handler that toggles a class.
+11. **`Delegate`, not `On`, inside a repainted region.** `Render` replaces the nodes an
+    `On` was bound to. Outside a page scope — an app-shell control registered at startup —
+    `On` returns the release func, and it is the only handle to the `js.Func` beneath.
+
+---
+
+## Non-goals — do not invent these
+
+howl-go deliberately does not have, and proposals should not assume:
+
+- a `ctx` wrapper (`ctx.json`, `ctx.cookies`, `ctx.query`) — the standard library has these
+- pluggable render engines — `templ.Component` is already the seam
+- full client-side hydration of every page — islands + wasm is the opposite bet
+- a bundler, CSS pipeline, or any Node dependency
+- true HMR — Go cannot hot-swap a linked binary; the dev loop is rebuild + restart
+- an ORM or admin UI — `db` is a document store (no relations, no table mapping, no codegen),
+  it is optional, and nothing under `core/` imports it
+- SSG for dynamic routes — `Export` skips anything with a `{param}`
+
+---
+
+## Added after v0.1.0
+
+`core/mw`, `core/console`, `core/state`, `app.Static` (ETag/304/compress-once),
+`Config.Use`/`OnError`/`Log`/`ClientData`/`Dev`/`StaticMaxAge`/`StaticImmutable`,
+`a.Mount`/`a.Handler`/`a.Wrap`/`a.Log`, `app.SSE`, `router.SetStatus`/`NotFound`/`Status`,
+`router.Client`/`ClientConfig`/`WithClient`, `Route.Raw`, the `.bare` and `.raw` modifiers,
+`window.howl` (navigate/prefetch/island/config), `dom.Navigate`/`dom.Prefetch`,
+`core/cmd/howl dev` with `Config.PublicDir` and the `HOWL_*` environment
+variables, `router.Client.Live`, `core/api` + `core/cmd/fsapis` (typed endpoints,
+generated table, generated client), `howl check` and `howl mcp`, `db` +
+`db/pg` + `db/memdb` (the document store), `//howl:data` + `Route.Data` +
+`router.Client.Pages` (per-route client data), `dom.On` returning a release func +
+`dom.Off`, the `desktop` module (native window) + `a.Serve`, the page scope
+(`signal.Scope`/`OnCleanup`, `dom.Mount`/`Unmount`) that made `Unmount` optional,
+`signal.Batch`, `dom.Delegate`, `dom.Event`, `Element.Render`, `router.Client.Build` +
+`X-Howl-Build` (an open tab reloads itself after a deploy), `dom.Embedded` (the store
+snapshot serialised by the server into the page, restored in `Mount` without a fetch),
+`Element.Focus`, `dom.Frame` (per-paint animation, released with the scope), `howl package`
+(the `.app` bundle and the Linux install tree, from one 1024px PNG) and the macOS menu bar
+`desktop` now installs (`Options.NoMenu` to decline), the
+`howl_frontend` MCP tool (`format: "json"` for the five parts as fields) and
+`www/docs/11-frontend.md` (the browser recipes), the store's `Hydrate`/`Commit`/
+`Rejected` (optimistic commits rolled back when the server refuses; scaffolded), the
+`register-in-goroutine` and `unmount-close-unguarded` check rules, the morph behind
+`Element.Render` (`howl.morph(el, html)` in `app.js`; keyed by `data-key` or `id`), the
+store's `Offline`/`Queued` and its ordered sender with backoff (an outage queues ops,
+never drops them), `api.Refused`.
+
+Removed: `signal.WatchAny` and `signal.WatchImmediate` (one `Effect` reading several
+signals is the idiomatic form), and `dom.On`'s handler is now `func(dom.Event)`.
+
+Removed: `app.GzipStatic` (replaced by `app.Static`), the framework's built-in demo
+islands (applications register their own). The `howl-wasm-routes` JSON script still works
+but is superseded by `howl-client`.
+
+---
+
+## Reference
+
+- `README.md` — overview, measurements, the client runtime
+- `www/docs/*.md` — routing, rendering, lifecycle, reactivity, navigation, constraints, HTTP, dev server
+- `DESIGN-LOG.md` — why every convention is what it is, and the bugs worth remembering
+- `examples/hello` — smallest standalone module importing the tagged release
+- `examples/toy_app` — dashboard, blog, local-first todos, wasm, islands; `/lab` exercises every browser primitive on one screen
+- `examples/toy_app/desktop` — the same app in a native window (`make run-desktop`)
+- `www` — the documentation site, built with the framework

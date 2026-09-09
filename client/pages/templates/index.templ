@@ -1,0 +1,99 @@
+package templates
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/card"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+templ Head() {
+	<title>Templates — AppEditions</title>
+}
+
+// Templates is the library: what a set can start from.
+//
+// The shipped ones are seeded into the database on every start rather than
+// read from the source at use time, which is what makes them editable — a
+// duplicate is a real row and it is yours. Editing a built-in is allowed too;
+// it is restored on the next start, so a bad edit costs a restart rather than
+// a reinstall.
+templ Templates() {
+	{{ v := view.LibraryOf(ctx) }}
+	<div class="mx-auto w-full max-w-6xl px-5 py-10">
+		<header class="mb-8">
+			<h1 class="text-2xl font-semibold tracking-tight">Templates</h1>
+			<p class="mt-1 text-sm text-muted-foreground">
+				A template is a complete look plus, optionally, one variant per screen — which is what gives a listing its rhythm rather than ten identical tiles.
+			</p>
+		</header>
+		<ul class="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+			for _, t := range v.Templates {
+				<li>
+					@templateCard(t)
+				</li>
+			}
+		</ul>
+	</div>
+}
+
+templ templateCard(t model.Template) {
+	@card.Card(card.Props{Class: "h-full gap-0 overflow-hidden py-0"}) {
+		<div class="flex items-center justify-center gap-1.5 bg-secondary/40 p-4">
+			<!-- One <img> per store tile: a panorama template delivers two
+			     files and the card shows two, never the wide composition they
+			     are cut from. -->
+			for part := range view.TemplateSpan(t) {
+				<img
+					src={ fmt.Sprintf("/api/template-preview/%s?w=150&part=%d&v=%s", t.ID, part, model.TemplateTag(t, "", "", 150, part)) }
+					alt=""
+					loading="lazy"
+					class="h-52 w-auto rounded-md tile-shadow"
+				/>
+			}
+		</div>
+		<div class="flex flex-1 flex-col gap-2 p-4">
+			<div class="flex items-start justify-between gap-2">
+				<h2 class="text-sm font-medium">{ t.Label }</h2>
+				if t.Builtin {
+					@ui.Count("built in", "")
+				}
+			</div>
+			<p class="line-clamp-4 flex-1 text-xs text-muted-foreground">{ t.Description }</p>
+			<div class="flex items-center justify-between pt-1">
+				if t.Slots() > 0 {
+					<span class="text-[11px] text-muted-foreground">{ strconv.Itoa(t.Slots()) } slots</span>
+				} else {
+					<span class="text-[11px] text-muted-foreground">freeform</span>
+				}
+				<span class="flex items-center gap-1">
+					<button
+						type="button"
+						class="rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+						data-action={ "/api/templates/" + t.ID + "/duplicate" }
+						data-body="{}"
+						aria-label="Duplicate"
+					>
+						@ui.Icon("copy-doc", "size-3.5")
+					</button>
+					if !t.Builtin {
+						<button
+							type="button"
+							class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+							data-action={ "/api/templates/" + t.ID + "/delete" }
+							data-body="{}"
+							data-confirm={ "Delete " + t.Label + "?" }
+							aria-label="Delete"
+						>
+							@ui.Icon("trash", "size-3.5")
+						</button>
+					}
+				</span>
+			</div>
+		</div>
+	}
+}

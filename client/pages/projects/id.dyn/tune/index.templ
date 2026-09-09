@@ -1,0 +1,348 @@
+package tune
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+	"github.com/mirairoad/appeditions/internal/model"
+)
+
+templ Head() {
+	<title>Fine-tune — AppEditions</title>
+}
+
+// Tune is every control, scoped either to the whole set or to one screen.
+//
+// The scope is the important part. A value set here with a screen selected
+// becomes an *override* on that screen — an exception that survives reordering
+// and template variants — and a value set with no screen selected moves the
+// whole set. Nothing writes a resolved value into an override to mean "same as
+// the set": that would silently pin it, and the screen would stop following
+// the global for the rest of its life.
+templ Tune() {
+	{{ e := view.EditorOf(ctx) }}
+	{{ s := e.Settings() }}
+	{{ screen, scoped := e.Screen() }}
+	<div class="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+		<div class="space-y-6">
+			<header>
+				<h1 class="text-xl font-semibold tracking-tight">Fine-tune</h1>
+				<p class="mt-1 text-sm text-muted-foreground">
+					if scoped {
+						Changes apply to this screen only.
+					} else {
+						Changes apply to every screen that has not overridden them.
+					}
+				</p>
+			</header>
+			<div class="flex flex-wrap items-center gap-2">
+				<a
+					href={ templ.SafeURL(ui.StepPath(e.Project.ID, "tune")) }
+					class={ "rounded-md border px-2.5 py-1 text-xs transition-colors",
+						templ.KV("border-primary bg-primary/15", !scoped),
+						templ.KV("border-border/70 text-muted-foreground", scoped) }
+				>
+					Whole set
+				</a>
+				for i, sc := range e.Project.Screens() {
+					<a
+						href={ templ.SafeURL(ui.StepPath(e.Project.ID, "tune") + "?screen=" + sc.ID) }
+						class={ "rounded-md border px-2.5 py-1 text-xs transition-colors",
+							templ.KV("border-primary bg-primary/15", scoped && sc.ID == screen.ID),
+							templ.KV("border-border/70 text-muted-foreground", !(scoped && sc.ID == screen.ID)) }
+					>
+						{ strconv.Itoa(i + 1) }
+					</a>
+				}
+			</div>
+			<!-- A grid, not a strip. Fine-tuning is a comparison — the set has
+			     to hold together, and the whole point is to see the effect of a
+			     control on all of them at once. A horizontal scroller shows
+			     three tiles and hides the rest behind a gesture, so a change
+			     was judged on the three that happened to be in view. Four
+			     across, wrapping down, and the tiles are 240px instead of 160
+			     because tuning type at 160 is guessing. -->
+			<div class="rounded-xl border border-border/60 bg-white p-5">
+				if scoped {
+					<div class="mx-auto w-full max-w-sm">
+						@ui.Tile(e, screen, 420, "")
+					</div>
+				} else if len(e.Project.Screens()) > 0 {
+					<ol class="grid grid-cols-2 gap-4 sm:grid-cols-3 2xl:grid-cols-4">
+						for i, sc := range e.Project.Screens() {
+							<li>
+								<a
+									href={ templ.SafeURL(ui.StepPath(e.Project.ID, "tune") + "?screen=" + sc.ID) }
+									class="block rounded-lg outline-offset-4 transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+								>
+									@ui.Tile(e, sc, 240, "")
+									<span class="mt-1.5 block text-[11px] text-muted-foreground">
+										{ strconv.Itoa(i + 1) }
+										if pinned(sc) {
+											<span class="text-primary">· tuned on its own</span>
+										}
+									</span>
+								</a>
+							</li>
+						}
+					</ol>
+				} else {
+					<p class="py-10 text-center text-sm text-muted-foreground">Nothing to draw yet.</p>
+				}
+			</div>
+		</div>
+		<!-- The panel carries the grey, not the page. The tiles are the thing
+		     being judged and they are judged against white — a store page is
+		     white — so the surface behind them stays white and the controls sit
+		     on their own panel. It is sticky because the strip below it is
+		     taller than the window and a control you have to scroll back up to
+		     is a control you stop using. -->
+		<div
+			data-patch-scope={ scopeEndpoint(e) }
+			class="h-fit space-y-6 rounded-xl border border-border/60 bg-secondary/40 p-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:overscroll-contain"
+		>
+			@section(e, "background", "Background", scoped, screen) {
+				<!-- No swatch palette. A row of pre-chosen colours is a row of
+				     somebody else's decisions, and it was the largest thing in
+				     the panel: an author matching their own brand reads a hex
+				     off a design file and types it, and one that is exploring
+				     is better served by the system picker's wheel and its
+				     recent colours than by twelve squares. -->
+				@ui.Choice("Kind") {
+					@ui.ChoiceOption("background_kind", "solid", "Solid", s.Background.Kind != "gradient")
+					@ui.ChoiceOption("background_kind", "gradient", "Gradient", s.Background.Kind == "gradient")
+				}
+				if s.Background.Kind == "gradient" {
+					<div class="grid grid-cols-2 gap-3">
+						@ui.ColorField("gradient_from", "From", orDefault(s.Background.From, "#eaf2ff")) {
+						}
+						@ui.ColorField("gradient_to", "To", orDefault(s.Background.To, "#ffffff")) {
+						}
+					</div>
+					<!-- The renderer's gradient runs corner to corner at an
+					     angle; there is no midpoint stop to move, so this is
+					     the direction rather than a blend percentage. CSS
+					     convention: 180 runs top to bottom. -->
+					@ui.Range("gradient_angle", "Direction", s.Background.Angle, 0, 360, 5, "°")
+					<span
+						class="block h-8 rounded-md"
+						style={ gradientStyle(s.Background) }
+					></span>
+				} else {
+					@ui.ColorField("background_color", "Colour", solidValue(s.Background)) {
+					}
+				}
+				@ui.ColorField("backdrop_color", "Card behind the device", orDefault(s.BackdropColor, "#e8e8ec")) {
+					<button type="button" class="rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground" data-patch-set="backdrop_color" data-value="">
+						none
+					</button>
+				}
+			}
+			@section(e, "device", "Device", scoped, screen) {
+				@ui.NativeSelect("device_id", "Frame") {
+					for _, d := range e.Devices {
+						@ui.Option(d.ID, d.Group+" — "+d.Label, d.ID == s.DeviceID)
+					}
+				}
+				@ui.NativeSelect("frame_color_id", "Body colour") {
+					for _, c := range e.Frames {
+						@ui.Option(c.ID, c.Label, c.ID == s.FrameColorID)
+					}
+				}
+			}
+			@section(e, "layout", "Composition", scoped, screen) {
+				@ui.NativeSelect("layout", "Layout") {
+					for _, l := range e.Layouts {
+						@ui.Option(l.ID, layoutLabel(l), l.ID == s.Layout)
+					}
+				}
+				@ui.NativeSelect("position_id", "Arrangement") {
+					for _, p := range e.Positions {
+						@ui.Option(p.ID, p.Label, p.ID == s.PositionID)
+					}
+				}
+			}
+			@section(e, "type", "Font", scoped, screen) {
+				@ui.NativeSelect("font_id", "Typeface") {
+					for _, f := range e.Fonts {
+						@ui.Option(f.ID, f.Label, f.ID == s.FontID)
+					}
+				}
+				@ui.ColorField("text_color", "Text colour", s.TextColor) {
+				}
+				@ui.ColorField("accent_color", "Second colour", orDefault(s.AccentColor, s.TextColor)) {
+					if s.AccentColor != "" {
+						<button type="button" class="rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground" data-patch-set="accent_color" data-value="">
+							none
+						</button>
+					}
+				}
+				<dl class="-mt-0.5 space-y-1 text-[11px] text-muted-foreground">
+					<div class="flex gap-2">
+						<dt class="w-24 shrink-0 font-mono">*starred*</dt>
+						<dd>a marker band behind the phrase</dd>
+					</div>
+					<div class="flex gap-2">
+						<dt class="w-24 shrink-0 font-mono">**doubled**</dt>
+						<dd>the phrase in this colour, no band</dd>
+					</div>
+					<div class="flex gap-2">
+						<dt class="w-24 shrink-0 font-mono">***tripled***</dt>
+						<dd>both — a band, with the phrase on it in this colour</dd>
+					</div>
+				</dl>
+				@ui.NativeSelect("text_align", "Alignment") {
+					@ui.Option("center", "Centred", s.TextAlign == model.AlignCenter)
+					@ui.Option("left", "Left", s.TextAlign == model.AlignLeft)
+				}
+				@ui.Range("headline_scale", "Headline size", s.HeadlineScale, 0.6, 2, 0.05, "×")
+				@ui.Range("subhead_scale", "Subtitle size", s.SubheadScale, 0.6, 2, 0.05, "×")
+				@ui.Range("headline_tracking", "Letter spacing", s.HeadlineTracking, -0.06, 0.06, 0.005, "em")
+				<div class="space-y-1.5">
+					<span class="text-xs text-muted-foreground">Marker colours</span>
+					<div class="flex flex-wrap items-center gap-2">
+						for i, hex := range s.Highlights {
+							<!-- Delete posts the whole remaining list rather than
+							     an index, so the endpoint has one way to set
+							     highlights and no second path that could
+							     disagree about the order. -->
+							<span class="group relative">
+								@ui.ColorChip("highlight_"+strconv.Itoa(i), hex, "Marker "+strconv.Itoa(i+1))
+								if len(s.Highlights) > 1 {
+									<button
+										type="button"
+										class="absolute -right-1.5 -top-1.5 hidden size-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground group-hover:flex hover:text-destructive"
+										data-patch-set="highlights"
+										data-value={ withoutHighlight(s.Highlights, i) }
+										aria-label={ "Remove marker " + strconv.Itoa(i+1) }
+									>
+										@ui.Icon("close", "size-2.5")
+									</button>
+								}
+							</span>
+						}
+						<button type="button" class="flex size-7 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground transition-colors hover:border-primary hover:text-primary" data-patch-set="highlights" data-value={ addHighlight(s.Highlights) } aria-label="Add a marker colour">
+							@ui.Icon("plus", "size-3.5")
+						</button>
+					</div>
+					<p class="text-[11px] text-muted-foreground">
+						The first colour marks the first <code class="font-mono">*starred*</code> phrase in a headline, the second marks a second one, and so on. A headline with one starred phrase only ever uses the first.
+					</p>
+				</div>
+			}
+			@section(e, "adjust", "Adjust", scoped, screen) {
+				@ui.Range("tilt", "Tilt", s.Tilt, -15, 15, 0.5, "°")
+				@ui.Range("device_scale", "Device size", s.DeviceScale, 0.6, 1.4, 0.02, "×")
+			}
+		</div>
+	</div>
+}
+
+// scopeEndpoint is where every control in the panel posts. One attribute on
+// the container rather than one per control: forge.js reads it from the
+// closest ancestor, so adding a control is adding markup and nothing else.
+func scopeEndpoint(e view.Editor) string {
+	if e.Selected != "" {
+		return "/api/projects/" + e.Project.ID + "/screens/" + e.Selected + "/settings"
+	}
+	return "/api/projects/" + e.Project.ID + "/settings"
+}
+
+// section carries the reset affordance. It is only offered on a screen: the
+// whole set has nothing to fall back to, and a "reset" that meant "back to the
+// factory defaults" would throw away the template.
+templ section(e view.Editor, key string, title string, scoped bool, screen model.Screen) {
+	<section class="space-y-3">
+		<header class="flex items-center justify-between">
+			<h2 class="text-sm font-semibold">{ title }</h2>
+			if scoped && overridden(screen, key) {
+				<button
+					type="button"
+					class="text-[11px] text-primary underline underline-offset-4"
+					data-action={ "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/reset" }
+					data-body={ `{"section":"` + key + `"}` }
+				>
+					follow the set
+				</button>
+			}
+		</header>
+		{ children... }
+	</section>
+}
+
+// overridden reports whether this screen pins any key in the section, which is
+// what the "follow the set" link undoes.
+func overridden(screen model.Screen, section string) bool {
+	o := screen.Overrides
+	set := map[string]bool{
+		"background": o.Background != nil || o.BackdropColor != nil,
+		"device":     o.DeviceID != nil || o.FrameColorID != nil,
+		"layout":     o.Layout != nil || o.PositionID != nil,
+		"type": o.FontID != nil || o.TextColor != nil || o.AccentColor != nil || o.TextAlign != nil || o.Highlights != nil ||
+			o.HeadlineScale != nil || o.SubheadScale != nil || o.HeadlineTracking != nil,
+		"adjust": o.Tilt != nil || o.DeviceScale != nil,
+	}
+	return set[section]
+}
+
+func layoutLabel(l model.Layout) string {
+	if l.Span > 1 {
+		return l.Label + " (2 tiles)"
+	}
+	return l.Label
+}
+
+func gradientStyle(g model.Background) string {
+	return "background:linear-gradient(" + strconv.FormatFloat(g.Angle, 'f', -1, 64) + "deg," + g.From + "," + g.To + ")"
+}
+
+func solidValue(bg model.Background) string {
+	if bg.Kind == "solid" && bg.Color != "" {
+		return bg.Color
+	}
+	return "#eaf2ff"
+}
+
+func orDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+// addHighlight is the list with one more colour on the end, as the value the
+// "+" button posts. The button carries the whole next list rather than an
+// "append" verb, so the endpoint has one way to set highlights and no second
+// code path that could disagree about the order.
+func addHighlight(current []string) string {
+	next := append(append([]string{}, current...), "#ffe27a")
+	return strings.Join(next, ",")
+}
+
+// pinned reports whether a screen carries any override at all, which is what
+// the "tuned on its own" note in the grid means. It reads the same sections
+// the reset affordance does, so the note and the reset can never disagree.
+func pinned(screen model.Screen) bool {
+	for _, section := range []string{"background", "device", "layout", "type", "adjust"} {
+		if overridden(screen, section) {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutHighlight is the list with one colour taken out, as the value the
+// delete button posts. The whole list rather than an index, for the reason the
+// "+" button carries the whole list: the endpoint has one way to set
+// highlights, so there is no second code path to disagree about the order.
+func withoutHighlight(current []string, drop int) string {
+	out := make([]string, 0, len(current))
+	for i, hex := range current {
+		if i != drop {
+			out = append(out, hex)
+		}
+	}
+	return strings.Join(out, ",")
+}

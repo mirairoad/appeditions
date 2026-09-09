@@ -1,0 +1,210 @@
+package copy
+
+import (
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+
+	"github.com/mirairoad/appeditions/client/ui"
+	"github.com/mirairoad/appeditions/client/view"
+)
+
+templ Head() {
+	<title>Copy — AppEditions</title>
+}
+
+// Copy is the words, one language at a time.
+//
+// The language is in the URL rather than in a control, because it is part of
+// which page you are on: a reload, a bookmark and the back button all have to
+// keep it. A screen with no words in the active language falls back to the
+// base one and says so, so adding a language never blanks a preview — it just
+// gives you a list of what is left to write.
+templ Copy() {
+	{{ e := view.EditorOf(ctx) }}
+	{{ missing := e.Project.MissingCopy(e.Locale) }}
+	<div class="space-y-8">
+		<!-- No language tabs here. The language is in the rail, beside the
+		     store slot, because every step is drawn in one of each and a
+		     switcher that only existed on this page read as a different
+		     setting from the one two panels away. -->
+		<header>
+			<h1 class="text-xl font-semibold tracking-tight">Copy</h1>
+			<p class="mt-1 text-sm text-muted-foreground">
+				<code class="font-mono">*one*</code> gives a phrase a marker band, <code class="font-mono">**two**</code> sets it in the second colour, <code class="font-mono">***three***</code> does both — the colours live on the Fine-tune step. <code class="font-mono">\n</code> breaks the line where you want it instead of where the width does.
+			</p>
+		</header>
+		@assistant(e, missing)
+		if len(e.Project.Screens()) == 0 {
+			@ui.Empty("No screens yet", "Pick a look and drop your screenshots in; the words come last, when there is something to put them on.")
+		} else {
+			<ul class="space-y-4">
+				for i, screen := range e.Project.Screens() {
+					{{ c := e.Copy(screen) }}
+					<li class="flex gap-4 rounded-xl border border-border/70 p-4">
+						<div class="w-24 shrink-0">
+							@ui.Tile(e, screen, 96, "")
+						</div>
+						<div class="min-w-0 flex-1 space-y-3">
+							<div class="flex items-center gap-2">
+								<span class="text-xs text-muted-foreground">Screen { strconv.Itoa(i + 1) }</span>
+								if !e.Written(screen) && e.Locale != e.Project.BaseLocale {
+									@ui.Count("showing the base language", "warn")
+								}
+							</div>
+							if part := e.Part(screen); part != "" {
+								<!-- A slice of another screen's composition. There
+								     is one drawing and the words are in it, so
+								     this row says where they are edited rather
+								     than offering a second pair of fields that
+								     write to the same place. -->
+								<p class="text-xs text-muted-foreground">
+									The { part } — it carries that screen's words.
+								</p>
+							} else {
+								<label class="block space-y-1">
+									<span class="text-xs text-muted-foreground">Headline</span>
+									@input.Input(input.Props{
+										ID:    "h-" + screen.ID,
+										Name:  "headline",
+										Value: c.Headline,
+										Attributes: templ.Attributes{
+											"data-copy":   "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/copy",
+											"data-locale": e.Locale,
+											"data-field":  "headline",
+										},
+									})
+								</label>
+								<label class="block space-y-1">
+									<span class="text-xs text-muted-foreground">Subtitle</span>
+									@textarea.Textarea(textarea.Props{
+										ID:    "s-" + screen.ID,
+										Name:  "subhead",
+										Rows:  2,
+										Value: c.Subhead,
+										Attributes: templ.Attributes{
+											"data-copy":   "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/copy",
+											"data-locale": e.Locale,
+											"data-field":  "subhead",
+										},
+									})
+								</label>
+							}
+						</div>
+					</li>
+				}
+			</ul>
+		}
+	</div>
+}
+
+// assistant is the AI half. It is drawn only when a provider is actually on
+// this machine: an action that fails with "command not found" after the click
+// is worse than one that was never offered.
+//
+// Writing opens a modal rather than firing straight away. A model given
+// nothing but the app's name writes copy about a generic app, and the author
+// is the only one who knows what the screens are *for* — so the brief is asked
+// for first, in their own words, and it is the difference between a draft
+// worth editing and a draft worth deleting.
+templ assistant(e view.Editor, missing []string) {
+	{{ shell := view.ShellOf(ctx) }}
+	if len(shell.Providers) > 0 && len(e.Project.Screens()) > 0 {
+		<div class="rounded-xl border border-border/70 bg-surface/60 p-4">
+			<div class="flex flex-wrap items-center gap-3">
+				<span class="flex items-center gap-1.5 text-sm font-medium">
+					@ui.Icon("sparkle", "size-4 text-primary")
+					Draft with
+				</span>
+				<select name="ai_provider" class="cn-native-select w-40" data-patch>
+					for _, p := range shell.Providers {
+						@ui.Option(p.ID, p.Label, p.ID == e.Project.AIProvider)
+					}
+				</select>
+				<span class="flex-1"></span>
+				if e.Locale == e.Project.BaseLocale {
+					@button.Button(button.Props{Variant: button.VariantSecondary, Size: button.SizeSm, Attributes: ui.PanelToggle("ai-write")}) {
+						@ui.Icon("sparkle", "size-4")
+						Write the headlines
+					}
+				} else {
+					@ui.Slow("Translate from "+e.Project.BaseLocale, "sparkle",
+						"/api/projects/"+e.Project.ID+"/ai/translate",
+						`{"locale":"`+e.Locale+`","only_missing":true}`, button.VariantSecondary)
+					if len(missing) == 0 {
+						@ui.Slow("Redo all", "", "/api/projects/"+e.Project.ID+"/ai/translate",
+							`{"locale":"`+e.Locale+`","only_missing":false}`, button.VariantGhost)
+					}
+				}
+			</div>
+			<p class="mt-2 text-xs text-muted-foreground">
+				Runs the CLI you already have signed in, on this machine. It writes a draft into the fields; nothing is sent anywhere else, and nothing is saved until you can see it.
+			</p>
+		</div>
+		@writeModal(e)
+	}
+}
+
+// writeModal asks for the brief and says what the two steps are, because the
+// order is the whole trick: describe the screens in your own words, then let
+// it write them. The prompt it builds casts the model as a marketing writer —
+// the default voice of a coding agent is documentation, and documentation on a
+// store tile reads as an instruction manual.
+templ writeModal(e view.Editor) {
+	@ui.Modal("ai-write", "Write the headlines", "Two steps. The first one is the one that matters.", writeActions(e)) {
+		<form id="ai-write-form" data-form={ "/api/projects/" + e.Project.ID + "/ai/write" } class="space-y-5">
+			<input type="hidden" name="locale" value={ e.Locale }/>
+			<ol class="space-y-4">
+				<li class="flex gap-3">
+					<span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/50 text-xs font-medium">1</span>
+					<div class="min-w-0 flex-1 space-y-2">
+						<p class="text-sm font-medium">Say what the app is, in your words</p>
+						<p class="text-xs text-muted-foreground">
+							Who it is for, what it replaces, the one thing it does better. Rough notes beat a polished paragraph — this is context, not copy.
+						</p>
+						@textarea.Textarea(textarea.Props{
+							ID:          "ai-brief",
+							Name:        "brief",
+							Rows:        4,
+							Value:       e.Project.Description,
+							Placeholder: "A shopping list you can talk to. For households who keep losing the paper one. Voice capture is the thing nobody else does well.",
+						})
+					</div>
+				</li>
+				<li class="flex gap-3">
+					<span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/50 text-xs font-medium">2</span>
+					<div class="min-w-0 flex-1 space-y-1">
+						<p class="text-sm font-medium">Write the headlines</p>
+						<p class="text-xs text-muted-foreground">
+							It reads every screen in order and writes them as a sequence — a promise, then a proof, then a reason to install. The drafts land in the fields; nothing is saved until you have read them.
+						</p>
+					</div>
+				</li>
+			</ol>
+			<p class="rounded-lg border border-border/70 bg-secondary/30 px-3 py-2 text-xs text-muted-foreground">
+				This can take a minute. The CLI runs on your machine and the button says so while it works.
+			</p>
+		</form>
+	}
+}
+
+templ writeActions(e view.Editor) {
+	<div class="flex items-center gap-2">
+		@button.Button(button.Props{
+			Type: button.TypeSubmit,
+			Size: button.SizeSm,
+			Attributes: templ.Attributes{
+				"form":           "ai-write-form",
+				"data-slow":      "Writing… this can take a minute",
+			},
+		}) {
+			@ui.Icon("sparkle", "size-4")
+			Write the headlines
+		}
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeSm, Attributes: ui.PanelToggle("ai-write")}) {
+			Cancel
+		}
+	</div>
+}
