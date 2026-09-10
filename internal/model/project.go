@@ -366,7 +366,10 @@ func (p *Project) LeadIndex(id string) int {
 // [PreviewTag] hashes these ids. Two walks of the ring would eventually
 // disagree about what a tile draws, and under an immutable preview URL that
 // disagreement is a tile that never updates again.
-func (p *Project) SourceAssets(screenID string) map[string]string {
+// It takes a locale because a screenshot is per-language: the neighbour drawn
+// beside a German tile is the German capture of that neighbour, not the base
+// one, or a two-device arrangement mixes languages inside one picture.
+func (p *Project) SourceAssets(screenID, locale string) map[string]string {
 	leads := p.Leads()
 	index := p.LeadIndex(screenID)
 	if len(leads) == 0 || index < 0 {
@@ -379,7 +382,7 @@ func (p *Project) SourceAssets(screenID string) map[string]string {
 		SourcePrev: -1,
 	} {
 		j := ((index+offset)%len(leads) + len(leads)) % len(leads)
-		if id := leads[j].AssetID; id != "" {
+		if id := leads[j].Asset(locale); id != "" {
 			out[key] = id
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/mirairoad/howl-go/db"
@@ -79,11 +80,6 @@ func (s *Store) Project(ctx context.Context, id string) (model.Project, error) {
 // author saved, and those have no key.
 func (s *Store) CreateProject(ctx context.Context, p model.Project, templateID string) (model.Project, error) {
 	p.Slug = s.uniqueSlug(ctx, model.Slug(p.Name, "project"))
-
-	tmpl := s.templateOrBuiltin(ctx, templateID)
-	if tmpl.ID != "" {
-		p.ApplyTemplate(tmpl, NewScreenID)
-	}
 	// Creation does not go through Edit, and a template whose first slot is a
 	// panorama has to open with both of its halves in the set.
 	presets.Sync(&p)
@@ -93,7 +89,19 @@ func (s *Store) CreateProject(ctx context.Context, p model.Project, templateID s
 		return model.Project{}, err
 	}
 	out := withID(row)
-	return out, os.MkdirAll(s.AssetsDir(out), 0o755)
+	if err := os.MkdirAll(s.AssetsDir(out), 0o755); err != nil {
+		return model.Project{}, err
+	}
+
+	// The look is applied after the row exists rather than before, because a
+	// template brings its own screenshots and an asset belongs to a project id
+	// — which does not exist until the row does. ApplyTemplate files them in
+	// and lays out the slots in one edit.
+	tmpl := s.templateOrBuiltin(ctx, templateID)
+	if tmpl.ID == "" {
+		return out, nil
+	}
+	return s.ApplyTemplate(ctx, out.ID, tmpl.ID)
 }
 
 // uniqueSlug keeps two projects called "Nobiru" from sharing a directory. The
@@ -161,8 +169,17 @@ func (s *Store) ApplyTemplate(ctx context.Context, projectID, templateID string)
 	if err != nil {
 		return model.Project{}, err
 	}
+	p, err := s.Project(ctx, projectID)
+	if err != nil {
+		return model.Project{}, err
+	}
+	// Outside the patch: the mutation may run again under the optimistic lock,
+	// and importing the pictures twice would write two rows for one file.
+	tmpl.Template.ID = tmpl.Doc.ID
+	shots := s.importShots(ctx, p, tmpl.Template, filledLeads(p))
+
 	return s.Edit(ctx, projectID, func(p *model.Project) {
-		p.ApplyTemplate(tmpl.Template, NewScreenID)
+		p.ApplyTemplate(tmpl.Template, shots, NewScreenID)
 		// The model works in the template's own vocabulary; the project stores
 		// the document id, because that is what a link has to carry.
 		p.TemplateID = tmpl.Doc.ID
@@ -266,12 +283,115 @@ func (s *Store) SaveTemplate(ctx context.Context, projectID, label, description 
 		t.Rhythm = ""
 	}
 
+	t.Locale = p.BaseLocale
+
 	row, err := s.Templates.Create(ctx, Template{Template: t})
 	if err != nil {
 		return model.Template{}, err
 	}
+	// The pictures go in after the row exists, because the directory they live
+	// in is named after its id. A failure here leaves a template with words
+	// and no captures, which is the old behaviour and still usable — better
+	// than refusing to save a look somebody spent an afternoon on.
+	if shots, err := s.keepShots(ctx, p, row.Doc.ID, t.Samples); err == nil {
+		if patched, err := s.Templates.Patch(ctx, row.Doc.ID, func(dst *Template) {
+			dst.Samples = shots
+		}); err == nil {
+			row = patched
+		}
+	}
 	row.Template.ID = row.Doc.ID
 	return row.Template, nil
+}
+
+// keepShots copies the screenshot behind each slot into the template's own
+// directory and names it in the sample.
+//
+// Copied, not referenced. An asset row belongs to one project and goes when it
+// does; a template pointing at one would come back, months later, as a set of
+// missing pictures — and the project it was saved from is exactly the one most
+// likely to have been deleted, because the template is what replaced it.
+//
+// The base language's capture, because that is the language the samples are
+// written in. A localised shot is a translation of this one.
+func (s *Store) keepShots(ctx context.Context, p model.Project, templateID string, samples []model.Sample) ([]model.Sample, error) {
+	assets, err := s.AssetsOf(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]Asset{}
+	for _, a := range assets {
+		byID[a.Doc.ID] = a
+	}
+
+	dir := s.TemplateDir(templateID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+
+	out := append([]model.Sample(nil), samples...)
+	for i, lead := range p.Leads() {
+		if i >= len(out) {
+			break
+		}
+		asset, ok := byID[lead.AssetID]
+		if !ok {
+			continue
+		}
+		data, err := os.ReadFile(s.Path(p, asset))
+		if err != nil {
+			continue // the row outlived its file; the slot keeps its words
+		}
+		name := fmt.Sprintf("%02d%s", i+1, asset.Ext)
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			return nil, err
+		}
+		out[i].Shot = name
+	}
+	return out, nil
+}
+
+// importShots copies a template's screenshots into a project as ordinary
+// assets, and answers with the asset id for each slot.
+//
+// Ordinary assets on purpose: once they are in, they are replaceable,
+// deletable and listed in Media like anything the author dropped in
+// themselves. PutAsset hashes, so applying the same template twice to one
+// project reuses the rows rather than filling the originals list with copies.
+//
+// keep is how many slots the project already has pictures for. Those are the
+// ones ApplyTemplate leaves alone, so importing their replacements would drop
+// screenshots into Media that nothing on screen uses.
+func (s *Store) importShots(ctx context.Context, p model.Project, t model.Template, keep int) []string {
+	dir := s.TemplateDir(t.ID)
+	shots := make([]string, len(t.Samples))
+	for i, sample := range t.Samples {
+		if sample.Shot == "" || i < keep {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, sample.Shot))
+		if err != nil {
+			continue // a template saved before shots were kept, or a lost file
+		}
+		asset, err := s.PutAsset(ctx, p, model.Slug(t.Label, "template")+"-"+sample.Shot, data)
+		if err != nil {
+			continue
+		}
+		shots[i] = asset.Doc.ID
+	}
+	return shots
+}
+
+// filledLeads counts the compositions the project already has a picture for,
+// which is the count ApplyTemplate keeps at the front of the set.
+func filledLeads(p model.Project) int {
+	n := 0
+	for _, screen := range p.Leads() {
+		if screen.Filled() {
+			n++
+		}
+	}
+	return n
 }
 
 // overridesFrom turns a full settings value into overrides that pin all of it
@@ -314,8 +434,41 @@ func (s *Store) DuplicateTemplate(ctx context.Context, id string) (model.Templat
 	if err != nil {
 		return model.Template{}, err
 	}
+	// The copy gets its own pictures. Sharing the directory would mean
+	// deleting either template took the other's screenshots with it.
+	if err := copyDir(s.TemplateDir(id), s.TemplateDir(row.Doc.ID)); err != nil {
+		return model.Template{}, err
+	}
 	row.Template.ID = row.Doc.ID
 	return row.Template, nil
+}
+
+// copyDir copies a template's screenshots. A source that is not there is not
+// an error: templates saved before shots were kept have no directory.
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteTemplate removes one of the author's own. A built-in is refused rather
@@ -329,5 +482,12 @@ func (s *Store) DeleteTemplate(ctx context.Context, id string) error {
 	if row.Builtin {
 		return fmt.Errorf("%w: a built-in template comes back on the next start", db.ErrInvalid)
 	}
-	return s.Templates.Delete(ctx, id)
+	if err := s.Templates.Delete(ctx, id); err != nil {
+		return err
+	}
+	// The row goes before the files, for the reason RemoveAsset gives: a
+	// directory with no row is invisible to the application and stays on disk
+	// forever, where a row with no directory is a template that lays out its
+	// slots and leaves them empty.
+	return os.RemoveAll(s.TemplateDir(id))
 }

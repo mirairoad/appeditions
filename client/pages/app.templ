@@ -27,7 +27,35 @@ templ App(title, head string) {
 			@templ.Raw(head)
 			<!--/page-head-->
 		</head>
-		<body class="min-h-screen bg-background font-sans text-foreground antialiased">
+		<!-- No hover prefetching, and no fragment swaps for links.
+		
+		     Both exist to hide a network round trip, and there is no network
+		     here: the server is in this process. What a swap costs instead is
+		     that #outlet is replaced — the top bar and the sidebar are torn
+		     down and rebuilt on every step change — and that a fragment
+		     rendered before the click that uses it describes a state which has
+		     since moved on.
+		
+		     data-no-prefetch stops the hover fetch; the framework reads it off
+		     the nearest ancestor, so once here it covers every link. Its
+		     sibling `data-no-spa` is read off the anchor itself, so it cannot
+		     be set once — turning links into document loads is a listener in
+		     forge.js instead. -->
+		<body class="min-h-screen bg-background font-sans text-foreground antialiased" data-no-prefetch>
+			<!-- The chrome's colour, and nothing else: a top band the height of
+			     the bar, and a left column the width of the workspace sidebar.
+			
+			     It is here, outside #outlet, because a navigation replaces the
+			     outlet's contents wholesale — the bar and the sidebar are torn
+			     down and rebuilt as new nodes on every step change, and the
+			     frame between the two is where the flash was. This does not
+			     move, so the dark shapes are continuous and the rebuild
+			     happens on top of its own colour.
+			
+			     It draws nothing on its own: the rules key off whether the
+			     page actually has a sidebar, so the index and the templates
+			     page get the band and no column. -->
+			<div data-chrome-backdrop aria-hidden="true"></div>
 			<main id="outlet" data-route={ router.Current(ctx) }>
 				{ children... }
 			</main>
@@ -49,7 +77,7 @@ templ NotFound(path string) {
 // files somewhere should say where, on every page, without being asked.
 templ footerNote() {
 	{{ shell := view.ShellOf(ctx) }}
-	<p class="text-xs text-muted-foreground">
+	<p class="text-xs text-chrome-foreground/60">
 		Files live in <code class="font-mono">{ shell.DataDir }</code>
 	</p>
 }

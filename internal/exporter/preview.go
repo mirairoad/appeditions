@@ -34,7 +34,7 @@ func Preview(ctx context.Context, s *store.Store, p model.Project, screenID, loc
 	span := render.Span(*screen, p.Settings)
 	part := min(max(screen.Part, 0), span-1)
 
-	sources, err := previewSources(ctx, s, p, screenID, width)
+	sources, err := previewSources(ctx, s, p, screenID, locale, width)
 	if err != nil {
 		return nil, "", err
 	}
@@ -49,13 +49,13 @@ func Preview(ctx context.Context, s *store.Store, p model.Project, screenID, loc
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, "", err
 	}
-	return buf.Bytes(), model.PreviewTag(p, *screen, copy, width), nil
+	return buf.Bytes(), model.PreviewTag(p, *screen, locale, copy, width), nil
 }
 
 // previewSources loads the screenshots one composition can reach. Unfilled
 // slots draw the placeholder, which is what makes a chosen template legible
 // before any screenshot exists.
-func previewSources(ctx context.Context, s *store.Store, p model.Project, screenID string, width int) (render.Sources, error) {
+func previewSources(ctx context.Context, s *store.Store, p model.Project, screenID, locale string, width int) (render.Sources, error) {
 	assets, err := s.AssetsOf(ctx, p.ID)
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func previewSources(ctx context.Context, s *store.Store, p model.Project, screen
 	// Which composition each source draws is [model.Project.SourceAssets] —
 	// the same walk [model.PreviewTag] hashes, so the bytes loaded here and
 	// the tag the tile is cached under can never describe different pictures.
-	sources := p.SourceAssets(screenID)
+	sources := p.SourceAssets(screenID, locale)
 
 	out := render.Sources{}
 	for _, key := range []string{model.SourceSelf, model.SourceNext, model.SourcePrev} {

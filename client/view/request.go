@@ -18,6 +18,14 @@ import (
 type Request struct {
 	Path  string
 	Query url.Values
+	// SidebarCollapsed is the workspace sidebar's state, from the cookie the
+	// trigger writes.
+	//
+	// It has to be readable at render time, and it has to be a cookie rather
+	// than a class the browser keeps: a local navigation replaces #outlet
+	// wholesale, so the sidebar is re-rendered on every step change and any
+	// state held only in the DOM would spring back open each time.
+	SidebarCollapsed bool
 }
 
 // Param is one query parameter, or "".

@@ -71,7 +71,7 @@ func preview(s *store.Store) http.Handler {
 		// every tile after any change, so most of these requests are answerable
 		// without rendering anything — and the ones that are not are exactly
 		// the tiles that actually changed.
-		version := model.PreviewTag(p, *screen, screen.Text(locale, p.BaseLocale), width)
+		version := model.PreviewTag(p, *screen, locale, screen.Text(locale, p.BaseLocale), width)
 		tag := `"` + version + `"`
 		w.Header().Set("ETag", tag)
 		// Cached hard when the URL names the drawing, exactly as the icon is.
@@ -302,13 +302,14 @@ func upload(s *store.Store) http.Handler {
 		// the empty slots in order and then extend the set.
 		if screenID := r.FormValue("screen"); screenID != "" && len(assets) > 0 {
 			p, err = s.Edit(r.Context(), p.ID, func(p *model.Project) {
-				// The composition, not the half: replacing the right tile of a
-				// panorama replaces the picture both halves are cut from, and
-				// writing it onto the half alone would be undone by the sync
-				// that follows every edit.
-				if screen, ok := p.Lead(screenID); ok {
-					screen.AssetID = assets[0].Doc.ID
+				// Into the language the editor is showing: dropping a Japanese
+				// capture onto a tile while looking at Japanese must not
+				// rewrite the English one every other language falls back to.
+				locale := r.FormValue("locale")
+				if !p.HasLocale(locale) {
+					locale = p.BaseLocale
 				}
+				p.SetPicture(screenID, locale, assets[0].Doc.ID)
 			})
 		} else {
 			p, err = s.AddShots(r.Context(), p.ID, assets)
@@ -361,7 +362,19 @@ func icon(s *store.Store) http.Handler {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		http.ServeFile(w, r, s.Path(p, asset))
+
+		// Downscaled rather than served from disk. What is stored is the
+		// author's original — for an app icon, the 1024px one the stores ask
+		// for — and this is drawn at 36px; the browser was decoding a megabyte
+		// of PNG to paint it, which costs a frame, on a new <img> element
+		// every navigation. That was the other half of the blink.
+		body, err := s.Icon(p, asset)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(body) //nolint:errcheck // a broken pipe is the client leaving
 	})
 }
 

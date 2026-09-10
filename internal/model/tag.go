@@ -27,7 +27,12 @@ import (
 // of being wrong is not symmetric: over-hashing redraws two neighbouring tiles
 // for nothing, under-hashing pins a stale tile behind an immutable URL for
 // good.
-func PreviewTag(p Project, screen Screen, copy Copy, width int) string {
+//
+// The locale is in the hash through the screenshot it resolves, not only
+// through the words: a screen with a German capture draws different pixels
+// under the same copy, and without this the German tile revalidated to a 304
+// and kept the base language's picture.
+func PreviewTag(p Project, screen Screen, locale string, copy Copy, width int) string {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
 	enc.Encode(screen.Overrides.Apply(p.Settings)) //nolint:errcheck // a hash writer cannot fail
@@ -35,7 +40,7 @@ func PreviewTag(p Project, screen Screen, copy Copy, width int) string {
 
 	// Sorted, because map iteration order is randomised and a tag that changed
 	// between two renders of the same state would make every request a miss.
-	sources := p.SourceAssets(screen.ID)
+	sources := p.SourceAssets(screen.ID, locale)
 	keys := make([]string, 0, len(sources))
 	for k := range sources {
 		keys = append(keys, k)
@@ -45,7 +50,7 @@ func PreviewTag(p Project, screen Screen, copy Copy, width int) string {
 		fmt.Fprintf(h, "%s=%s;", k, sources[k])
 	}
 
-	fmt.Fprintf(h, "%s/%d/%d", screen.AssetID, width, screen.Part)
+	fmt.Fprintf(h, "%s/%d/%d", screen.Asset(locale), width, screen.Part)
 	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 

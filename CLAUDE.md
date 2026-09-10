@@ -126,6 +126,12 @@ Each of these exists because breaking it produced a real bug.
    renders once on a cold load; a local navigation swaps `#outlet` and nothing
    else. The navigation lives in `layout.templ` for that reason.
 
+   The other half of that trade: everything in the outlet is *rebuilt* on every
+   navigation, chrome included, and a rebuilt dark panel flashes white for a
+   frame. `[data-chrome-backdrop]` is the shell's answer — it holds the top
+   bar's and the sidebar's colour still, from outside the outlet, and works out
+   what to draw from the sidebar's own attributes rather than from the route.
+
 9. **A closed panel is `display:none`, and `display:none` markup is still
    there.** Anything expensive inside a shut disclosure must be gated on whether
    it is open, or it runs forever for nobody.
@@ -271,13 +277,27 @@ server code importing `core/signal`.
 
 ## Two client rules that fail silently
 
-**Re-render after a write with `fresh: true`.** `howl.navigate` serves a
-fragment from its prefetch cache without asking the server when the entry is
-under 15 s old. That is right for a link and wrong for the navigation after a
-mutation, where the cached fragment is by definition the state *before* it —
-applying a rhythm left the strip showing the old layout until the entry aged
-out. `refresh()` in `forge.js` passes `fresh: true`, and the option exists in
-howl-go because of this.
+**Links are document loads, not fragment swaps.** `howl.navigate` replaces
+`#outlet` — which is where the top bar and the sidebar live, so they are torn
+down and rebuilt on every step change — and it may serve the fragment from a
+cache filled before the click. Both of those buy something across a network and
+nothing at all here, where the server is in this process: a swap flashed the
+chrome, and a cached fragment described a set two edits ago or a sidebar that
+had since been collapsed.
+
+So `forge.js` intercepts link clicks in the capture phase and sets
+`location.href`. Capture is what makes it possible — howl's own handler is on
+`document` in the bubble phase and skips an event whose default is already
+prevented — and the eligibility test there mirrors the framework's `spaTarget`,
+which it has to: a link it takes over but howl would have declined simply stops
+working. `data-no-spa` says the same thing declaratively but is read off the
+anchor, not an ancestor, so it cannot be set once; `<body data-no-prefetch>`
+*is* read off the nearest ancestor and stops the hover fetch.
+
+**The one thing that still swaps is the re-render after a write.** `refresh()`
+passes `fresh: true`, so its fragment is never the cached one, and reloading
+the document on every nudge of a slider would throw away the scroll position
+and the control's focus. That swap is why `[data-chrome-backdrop]` exists.
 
 **Preview tiles render at 2× their layout width.** The `width` attribute is the
 CSS size and the pixels behind it are double, because every display this runs
@@ -313,6 +333,17 @@ the last size used.
 and the export does it once per target. Nothing else in the renderer knows
 targets exist, which is why adding them changed no drawing code.
 
+The **screenshots are per-language too**, but only where they need to be.
+`Screen.AssetID` is the base language's capture and every language draws it;
+`Screen.Shots[locale]` replaces it for one language, because a screenshot is a
+picture of the app and a Japanese listing showing an English UI is not the app
+anyone is downloading. Absent means inherit, exactly as a nil override does —
+so clearing under a translation goes back to the base picture rather than
+emptying the slot, and a project that ships one set of captures never writes
+the field at all. `Screen.Asset(locale)` resolves it, in one place, and
+`PreviewTag` hashes what that returns: a tag that hashed `AssetID` would leave
+the German tile revalidating to a 304 and drawing the English picture forever.
+
 ## Data
 
 Everything lives under `~/.appeditions` (or `$APPEDITIONS_HOME`):
@@ -323,8 +354,43 @@ appeditions.db              projects, templates, assets — SQLite, one JSON doc
   assets/<id>.png       the originals, never modified
   exports/<size>/<locale>/01-….png
   exports/<size>/<locale>/listing.txt   the store text for that language
+templates/<template-id>/01.png   the captures a saved look was designed against
 fonts/                  optional extra fonts, tried before the system's
 ```
+
+A saved template keeps a *copy* of the screenshots it was designed against, in
+its own directory beside the projects rather than inside one. A look is not
+separable from the pictures it was judged on — a headline sits where it does
+because of what was behind it — and the project a template was saved from is
+the one most likely to be deleted, because the template is what replaced it.
+`store.importShots` files them into the target as ordinary assets on apply, so
+they are replaceable and listed in Media like anything dropped in by hand, and
+only for the slots the project has no picture of its own for.
+
+`boot.Commit` is the short sha the binary was built from, stamped by the
+Makefile. It is the version that matters: there are no releases and no tags,
+`install.sh` builds whatever `main` points at, and running it again is how you
+update — so being out of date is that commit no longer being main's head.
+`internal/update` asks GitHub once every six hours in its own goroutine, never
+in the path of a render, and the sidebar grows an "Update available" button
+only when the answer is yes. Every failure is silent, and a build with nothing
+stamped in it (a `go run`, a source tarball) does not ask at all.
+
+The button runs **`update.sh`**, the project's own updater, fetched and piped to
+`sh` the way its own documentation says to — an install keeps only
+`uninstall.sh`, so there is no local copy to run. The script is the whole
+implementation and none of it is reimplemented in Go: it compares the revision
+`install.sh` recorded at `~/.local/state/appeditions/source-revision` against
+the tip, and rebuilds only if they differ. Note that this is a *different*
+question from the one the badge asks — the receipt says what was last
+installed, `boot.Commit` says what is running — and they disagree for exactly
+as long as it takes to relaunch.
+
+The request is held open for the whole build, about a minute, because the
+alternative is a job queue and a page that polls it and this application has
+neither. What comes back is the script's own last line. The new build is on
+disk when it does; the process serving the request is still the old one, so the
+message says to quit and reopen.
 
 A project is one document: the look, the languages, and a list of **versions**.
 An edit is one patch and one revision.

@@ -144,6 +144,11 @@ func (c *Client) TranslateCopy(ctx context.Context, id string, body ai.Translate
 	return api.Call[ai.Drafted](ctx, c.Transport, "POST", api.Path("/api/projects/{id}/ai/translate", id), nil, body)
 }
 
+// Update calls POST /api/update.
+func (c *Client) Update(ctx context.Context) (apistore.Saved, error) {
+	return api.Call[apistore.Saved](ctx, c.Transport, "POST", "/api/update", nil, nil)
+}
+
 // WriteCopy calls POST /api/projects/{id}/ai/write.
 func (c *Client) WriteCopy(ctx context.Context, id string, body ai.Draft) (ai.Drafted, error) {
 	return api.Call[ai.Drafted](ctx, c.Transport, "POST", api.Path("/api/projects/{id}/ai/write", id), nil, body)

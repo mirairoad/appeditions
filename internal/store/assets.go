@@ -10,7 +10,7 @@ import (
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,6 +118,53 @@ type imageCache struct {
 	m  map[string]image.Image
 }
 
+type byteCache struct {
+	mu sync.Mutex
+	m  map[string][]byte
+}
+
+// iconWidth is the size an app icon is served at.
+//
+// What is stored is whatever the author had, which for an app icon is the
+// 1024px one the stores ask for; the interface draws it at 36px in the
+// sidebar. Decoding a megabyte of PNG to paint a 36px chip costs a frame — and
+// a navigation replaces #outlet, so that <img> is a new element and that frame
+// is paid again on every step change, which is exactly what the icon blinking
+// was. 128 covers the largest place it is drawn (64px, at 2x).
+const iconWidth = 128
+
+// Icon is the project's icon at a size worth decoding, encoded once and kept.
+//
+// Cached as bytes rather than as an image, because the caller writes it to a
+// response: re-encoding a PNG per request would move the cost from the browser
+// to here rather than removing it. One entry per project, and the bytes under
+// an asset id never change — a new icon is a new asset.
+func (s *Store) Icon(p model.Project, a Asset) ([]byte, error) {
+	s.icons.mu.Lock()
+	if b, ok := s.icons.m[a.Doc.ID]; ok {
+		s.icons.mu.Unlock()
+		return b, nil
+	}
+	s.icons.mu.Unlock()
+
+	full, err := s.decode(s.Path(p, a))
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, downscale(full, iconWidth)); err != nil {
+		return nil, err
+	}
+
+	s.icons.mu.Lock()
+	defer s.icons.mu.Unlock()
+	if s.icons.m == nil {
+		s.icons.m = map[string][]byte{}
+	}
+	s.icons.m[a.Doc.ID] = buf.Bytes()
+	return buf.Bytes(), nil
+}
+
 // Source loads an asset sized for a render targeting targetW pixels of frame
 // width. Small targets get the cached preview; an export gets the original.
 func (s *Store) Source(p model.Project, a Asset, targetW int) (image.Image, error) {
@@ -151,8 +198,12 @@ func (s *Store) Source(p model.Project, a Asset, targetW int) (image.Image, erro
 // replaced, which is the only way the bytes under an id can change.
 func (s *Store) Forget(assetID string) {
 	s.images.mu.Lock()
-	defer s.images.mu.Unlock()
 	delete(s.images.m, assetID)
+	s.images.mu.Unlock()
+
+	s.icons.mu.Lock()
+	defer s.icons.mu.Unlock()
+	delete(s.icons.m, assetID)
 }
 
 func (s *Store) decode(path string) (image.Image, error) {
@@ -207,10 +258,17 @@ func (s *Store) RemoveAsset(ctx context.Context, projectID, assetID string) erro
 	if p.IconAssetID == assetID {
 		return fmt.Errorf("%s is the project's icon — change it in project settings", asset.Name)
 	}
+	// Every language, not just the base one: a picture used only as the German
+	// capture of one screen is as much in use as the base one beside it.
 	for _, v := range p.Versions {
 		for _, screen := range v.Screens {
 			if screen.AssetID == assetID {
 				return fmt.Errorf("%s is still used by %s — remove the screen first", asset.Name, v.Name)
+			}
+			for locale, id := range screen.Shots {
+				if id == assetID {
+					return fmt.Errorf("%s is still used by %s in %s — replace it there first", asset.Name, v.Name, locale)
+				}
 			}
 		}
 	}

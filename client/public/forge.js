@@ -37,6 +37,42 @@ async function refresh() {
   }
 }
 
+// Links are document loads, not fragment swaps.
+//
+// The swap replaces #outlet, which is where the top bar and the sidebar live:
+// they are torn down and rebuilt on every step change, and howl may serve the
+// fragment from a cache filled before the click. Neither is buying anything on
+// a server that is in this process. A document load hands the whole page over
+// at once, and the browser holds the previous one on screen until it is ready
+// — the one thing a swap cannot do.
+//
+// The capture phase is what makes this possible: howl's link handler is on
+// `document` in the bubble phase and skips any event whose default has already
+// been prevented. `data-no-spa` would say the same thing declaratively, but the
+// framework reads it off the anchor rather than an ancestor, so it cannot be
+// set once for the application.
+//
+// The eligibility test mirrors the framework's `spaTarget`. It has to: a link
+// this takes over but howl would have declined — another origin, a download, a
+// target — would simply stop working. There is no isRawRoute check because this
+// application has no *.raw.templ routes; add one here if it ever grows one.
+document.addEventListener(
+  "click",
+  (event) => {
+    if (event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const a = event.target.closest?.("a[href]");
+    if (!a || a.target || a.hasAttribute("download") || a.hasAttribute("data-no-spa")) return;
+
+    const url = new URL(a.href, location.origin);
+    if (url.origin !== location.origin || url.pathname.startsWith("/static/")) return;
+    event.preventDefault();
+    if (url.href === location.href) return;
+    location.href = url.pathname + url.search;
+  },
+  true,
+);
+
 /** Say that a slow action is running, in the button itself.
  *
  * `data-busy` alone dims a control and stops a second click, which is right for
@@ -76,7 +112,9 @@ async function post(url, body, el) {
       return null;
     }
     if (data?.redirect) {
-      window.howl ? window.howl.navigate(data.redirect) : (location.href = data.redirect);
+      // A document load, like every other link in this application: what the
+      // fragment swap is kept for is re-rendering the page you are already on.
+      location.href = data.redirect;
       return data;
     }
     await refresh();
@@ -244,6 +282,49 @@ document.addEventListener("click", (event) => {
   el.setAttribute("aria-expanded", String(toggle.checked));
 });
 
+// The workspace sidebar's collapse toggle.
+//
+// shadcn-templ ships this behaviour in its own script, which this application
+// does not serve: that script belongs to the interactive bundle, and its other
+// half moves the sidebar into a sheet on small screens through a dialog
+// component that is not here either. The desktop behaviour it actually needs
+// is two data attributes — every collapsed-state rule in the component keys
+// off them — so it is these few lines instead.
+//
+// The cookie is what makes it survive: every page here is a document load, so
+// the sidebar is rendered fresh each time and a state held only in the DOM
+// would come back open. The server reads the cookie and renders it the way it
+// was left. Same name and same values shadcn's own script writes, so neither
+// half has to know about the other.
+const SIDEBAR_COOKIE = "sidebar_state";
+
+/** Put a wrapper into a state. */
+function paintSidebar(wrapper, collapsed) {
+  const mode = wrapper.dataset.tuiSidebarCollapsibleMode;
+  if (mode === "none") return;
+  wrapper.dataset.state = collapsed ? "collapsed" : "expanded";
+  // Like shadcn, data-collapsible carries the mode only while collapsed, so
+  // the icon and offcanvas selectors need no second state check.
+  wrapper.setAttribute("data-collapsible", collapsed ? mode : "");
+}
+
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest("[data-tui-sidebar-trigger]");
+  if (!trigger) return;
+  const target = trigger.dataset.tuiSidebarTarget;
+  const wrapper =
+    (target &&
+      document.querySelector(
+        `[data-tui-sidebar-wrapper][data-tui-sidebar-id="${CSS.escape(target)}"]`,
+      )) ||
+    document.querySelector("[data-tui-sidebar-wrapper]");
+  if (!wrapper) return;
+
+  const collapsed = wrapper.dataset.state !== "collapsed";
+  paintSidebar(wrapper, collapsed);
+  document.cookie = `${SIDEBAR_COOKIE}=${collapsed ? "false" : "true"}; path=/; max-age=${60 * 60 * 24 * 7}`;
+});
+
 // The character counters on the Release step. The server renders the count and
 // this keeps it honest while typing — the only other place the client draws
 // before the server has answered, and for the same reason as the slider: a
@@ -299,7 +380,7 @@ document.addEventListener("change", (event) => {
   const el = event.target.closest("[data-goto]");
   if (!el) return;
   const url = el.dataset.goto + encodeURIComponent(el.value);
-  window.howl ? window.howl.navigate(url) : (location.href = url);
+  location.href = url;
 });
 
 // The tune panel. Every control carries `data-patch` and the panel carries the

@@ -119,7 +119,72 @@ and the accent is reserved for the current step and the primary action. Do not
 put the accent on ordinary chrome or none of that reads.
 
 Links mark themselves with `aria-current` and style from it, never with a class
-computed at render time.
+computed at render time — but the server has to answer that question the way
+the *runtime* answers it. howl re-applies `aria-current` after every load with
+`path === here || here.startsWith(path + "/")`, excluding `"/"` from the prefix
+case, and it **removes** the attribute where that is false. Marking "Projects"
+current inside a project painted it active and had the runtime take it away a
+frame later: a highlight that flashed on every navigation.
+
+The one exception is links that differ only by query string — the export step's
+language tabs. The runtime compares pathnames, so it marks every one of them
+current and the selection stops being visible; those style from `data-current`,
+which nothing else writes.
+
+## The workspace sidebar
+
+The project workspace's left column is **shadcn-templ's `sidebar`**, in
+`client/pages/projects/id.dyn/layout.templ`. It is the one component here that
+normally needs the interactive bundle, and it is usable anyway because its
+desktop behaviour is entirely CSS keyed off two attributes on the wrapper:
+`data-state` (`expanded`/`collapsed`) and `data-collapsible`. `forge.js` flips
+those; that is the whole toggle.
+
+Four things about it are load-bearing:
+
+- **The collapsed state is a cookie**, not DOM state. A local navigation
+  replaces `#outlet`, so this sidebar is re-rendered on every step change —
+  anything held only in the browser springs back open. `carryRequest` in
+  `boot/boot.go` reads `sidebar_state` into `view.Request`, and the layout
+  passes it to `sidebar.Provider` as `DisableDefaultOpen`. Same cookie name and
+  values shadcn's own script uses, so neither half has to know about the other.
+- **`top-14!`/`h-[calc(100svh-3.5rem)]!` are important on purpose.** The
+  component pins itself to `inset-y-0 h-svh`, which puts it *over* the 3.5rem
+  top bar rather than under it. The `!` sidesteps any question of what
+  tailwind-merge does with `inset-y-0` versus `top-14`.
+- **The chrome's colour is painted from the shell, not from the sidebar.**
+  Links are document loads (see CLAUDE.md), but `refresh()` after a write still
+  replaces `#outlet` — so the top bar and the sidebar are still torn down and
+  rebuilt on every mutation, and the frame in between is a flash of white where
+  the dark chrome was. `[data-chrome-backdrop]`
+  in `app.templ` is outside the outlet, never re-rendered, and paints the same
+  two shapes at `z-index: -1`. It reads the sidebar's own attributes through
+  `:has()`, so it draws a column only on pages that have one and at whatever
+  width the sidebar currently is; nothing has to tell it which page is on
+  screen. Its two widths mirror `sidebar.Provider`'s constants, which do not
+  reach outside the outlet.
+- **Below `md` the component hides itself** and moves its content into a sheet
+  that needs the dialog bundle. `app.css` shows the ordinary container at every
+  width instead, so a narrow window gets the 3rem icon rail rather than no
+  navigation at all.
+
+The colour comes from **one `--chrome`/`--chrome-foreground` pair** in
+`app.css`. The top bar wears it as `bg-chrome text-chrome-foreground` and
+`[data-slot="sidebar-wrapper"]` repoints `--sidebar*` at it, so the two meet
+with no seam and the chrome reads as a frame around a white page. Two values
+meant to match would eventually not; there is one. Every `bg-sidebar`
+and `text-sidebar-foreground` rule inside the component follows — including the
+ones nothing here has read. Anything drawn *in* the sidebar must therefore use
+`sidebar-foreground`, not `muted-foreground`: the muted colours are mixed
+against a white page and vanish here, which is how the "Showing" labels first
+shipped.
+
+**The selected row is the accent, and it cannot be a token.** style-nova paints
+hover, `:active` and `data-active` all from `--sidebar-accent`, so tinting that
+would make every row look selected under the pointer. The accent lives in one
+unlayered rule on `[data-slot="sidebar-menu-button"][data-active]`, which also
+beats the hover rule the same element carries. That, and the export button, are
+the only two things wearing the accent — the rule the theme block states.
 
 ## Panels and disclosures
 
@@ -175,6 +240,24 @@ and discard whatever had been typed.
 **Anything inside a card needs `card.Content`.** `cn-card` carries
 `padding-block` and no horizontal padding at all, so a form as a direct child of
 `card.Card` sits flush against the left and right borders.
+
+### An `<img>` in the outlet is a new element on every navigation
+
+Which means the browser starts its loading and decoding again, even for bytes
+it already has. `loading="lazy"` defers that to a later task and the default
+`decoding="async"` hands the decode off — either one leaves a frame with a hole
+where the image was, which reads as a blink. Chrome that is always on screen
+(`ui.ProjectIcon`) is therefore eager and `decoding="sync"`, and its endpoint
+answers `immutable` so there is no revalidation either.
+
+Cache and attributes are only half of it: what the browser decodes has to be
+small. An app icon is stored at whatever the author had — usually the 1024px
+one the stores ask for — and decoding a megabyte of PNG to paint a 36px chip
+costs a frame, paid again on every navigation. `store.Icon` serves it at 128px,
+encoded once and kept.
+
+`ui.Tile` keeps `loading="lazy"` on purpose: a set is dozens of tiles, each one
+a PNG the server renders, and most of them are below the fold.
 
 ### Gate whatever fills a closed panel
 

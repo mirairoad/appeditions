@@ -45,6 +45,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-chrome: var(--chrome);
+  --color-chrome-foreground: var(--chrome-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -95,8 +97,13 @@
   --border: oklch(.91 .004 265);
   --input: oklch(.87 .005 265);
   --ring: var(--primary);
-  /* The rail. Grey against the white page, which is the whole of the
-   * left-hand/right-hand split — there is no border doing that work. */
+  /* The chrome: the top bar and the workspace sidebar, which are one
+   * continuous dark frame around a white page. One pair of values, because
+   * two that were meant to match would eventually not. */
+  --chrome: oklch(.24 .008 265);
+  --chrome-foreground: oklch(.97 .002 265);
+  /* The rail's own tokens, for anything that reads them outside the
+   * workspace. Inside it they are repointed at the chrome below. */
   --sidebar: oklch(.967 .003 265);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -149,25 +156,219 @@
   display: none;
 }
 
-/* The project rail, which is a drawer below lg and a column at lg and up.
+/* The workspace sidebar is shadcn-templ's, and these are the three things this
+ * application has to say about it.
  *
- * Only the closed state lives here, and only below the breakpoint: above it the
- * rail is always visible and the checkbox means nothing. Written as media
- * queries rather than Tailwind variants because it has to beat the utility
- * classes the same element carries for its open state. */
-@media (max-width: 1023px) {
-  [data-rail]:not(:checked) + [data-rail-scrim],
-  [data-rail]:not(:checked) + [data-rail-scrim] + [data-rail-body] {
-    display: none;
-  }
-
-  body:has([data-rail]:checked) {
-    overflow: hidden;
-  }
+ * First, the surface: the same dark neutral the top bar is, so the two meet
+ * without a seam and the chrome reads as one frame around a white page. The
+ * store tiles are the artwork, and a dark frame is what makes a tile's own
+ * background read as the picture rather than as more chrome. Repointing the
+ * sidebar's own tokens rather than painting elements means every `bg-sidebar`
+ * and `text-sidebar-foreground` rule inside the component follows, including
+ * the ones this file has never heard of. */
+[data-slot="sidebar-wrapper"] {
+  --sidebar: var(--chrome);
+  --sidebar-foreground: var(--chrome-foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  /* Hover, as light on the field rather than as a second hue: a colour mixed
+   * from the foreground keeps its contrast whatever the surface is changed to,
+   * where a hard-coded tint would not. */
+  --sidebar-accent: color-mix(in oklab, var(--chrome-foreground) 10%, transparent);
+  --sidebar-accent-foreground: var(--chrome-foreground);
+  --sidebar-border: color-mix(in oklab, var(--chrome-foreground) 14%, transparent);
+  --sidebar-ring: var(--primary);
 }
 
-@media (min-width: 1024px) {
-  [data-rail-scrim] {
+/* Second, the row you are on. The accent is reserved for exactly two things —
+ * the current step and the primary action — and this is one of them.
+ *
+ * It cannot be done with `--sidebar-accent`, which is what the component paints
+ * the active row with: style-nova gives hover, :active and data-active the same
+ * token, so an accent-coloured selection would make every row look selected
+ * under the pointer. Unlayered, so it also beats the hover rule the same
+ * element carries. */
+[data-slot="sidebar-menu-button"][data-active] {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* The chrome's colour, painted from outside #outlet so a navigation cannot
+ * blink it.
+ *
+ * A navigation replaces everything inside the outlet, which is where the top
+ * bar and the sidebar live: they are rebuilt as new nodes on every step
+ * change. This element is not, so it holds the two dark shapes still and the
+ * rebuild lands on its own colour rather than on the page's white.
+ *
+ * Behind everything (`z-index: -1`), so it can never cover content: it paints
+ * over the canvas and under any element that has a background of its own,
+ * which is exactly the layer a backdrop wants.
+ *
+ * The column is drawn only when the page actually has a sidebar, and at the
+ * width the sidebar currently is — both read off the component's own
+ * attributes, so nothing here has to be told which page is on screen.
+ * `:has()` is what makes that possible; it is the one place in this file that
+ * depends on it. */
+[data-chrome-backdrop] {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: -1;
+  height: 3.5rem;
+  background: var(--chrome);
+  pointer-events: none;
+}
+
+/* Mirrors sidebar.Provider's own two constants. Written out rather than read
+ * through var(): the provider sets them inside the outlet, which this element
+ * is deliberately not in, so they do not reach here. */
+:root {
+  --chrome-rail: 16rem;
+  --chrome-rail-icon: 3rem;
+}
+
+body:has([data-tui-sidebar-wrapper]) [data-chrome-backdrop]::after {
+  content: "";
+  position: fixed;
+  top: 3.5rem;
+  bottom: 0;
+  left: 0;
+  width: var(--chrome-rail);
+  background: var(--chrome);
+  /* The sidebar's own 200ms, so the two edges move together on a collapse
+   * rather than one chasing the other. */
+  transition: width 200ms linear;
+}
+
+body:has([data-collapsible="icon"]) [data-chrome-backdrop]::after {
+  width: var(--chrome-rail-icon);
+}
+
+/* The collapsed rail: centred, and at a size worth being the only thing there.
+ *
+ * At icon width the component makes a row 2rem square and drops its padding to
+ * zero, but leaves the content aligned the way the expanded row had it — hard
+ * against the left edge, which is 8px off the centre of a 3rem rail. And the
+ * icon is still the 1rem it is beside a label, where the label was doing most
+ * of the work. Neither is wrong in the expanded rail, which is why this is
+ * scoped to the collapsed one. */
+[data-collapsible="icon"] [data-slot="sidebar-menu-button"] {
+  justify-content: center;
+  /* The gap belongs to a label that is no longer there. Left in, it is 8px of
+   * nothing to the icon's right, and the icon sits 4px off centre. */
+  gap: 0;
+}
+
+[data-collapsible="icon"] [data-slot="sidebar-menu-button"] svg,
+[data-collapsible="icon"] [data-slot="sidebar-footer"] a svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+[data-collapsible="icon"] [data-slot="sidebar-header"] > div {
+  justify-content: center;
+}
+
+/* The project icon, down from 2.25rem: at its own size it is wider than the
+ * header's content box and stands 4px proud of it. */
+[data-collapsible="icon"] [data-project-icon] {
+  width: 2rem;
+  height: 2rem;
+}
+
+/* The row labels, faded rather than clipped.
+ *
+ * A collapsed row is 2rem wide: 0.5rem of padding, a 1rem icon, 0.5rem of gap
+ * — which puts the label's box exactly on the button's right edge and leaves
+ * 8px of it showing through the overflow. Enough to read the first letter of
+ * "Release" and look like a mistake rather than a rail.
+ *
+ * Faded rather than hidden so the two states are joined by something: the
+ * width animates over 200ms in the component, and a label that vanished on the
+ * first frame would read as a different kind of change than the panel closing.
+ * There is no signal behind this and there does not need to be — the state is
+ * an attribute on an ancestor, which is what CSS is already reacting to
+ * everywhere else in this file.
+ *
+ * The rail's own hover label is a sibling of the button, not its last child,
+ * so it is untouched by this. */
+[data-slot="sidebar-menu-button"] > span:last-child {
+  overflow: hidden;
+  max-width: 12rem;
+  transition: opacity 150ms linear, max-width 200ms linear;
+}
+
+/* Faded *and* collapsed to nothing. Opacity alone leaves the label holding its
+ * width, and a flex row centred on an icon plus an invisible label puts the
+ * icon left of centre — which is what "the icons are not centred" was. The
+ * width goes over the component's own 200ms, so the label slides away with the
+ * panel rather than in front of it. */
+[data-collapsible="icon"] [data-slot="sidebar-menu-button"] > span:last-child {
+  opacity: 0;
+  max-width: 0;
+}
+
+/* Third, the collapsed rail's labels.
+ *
+ * A row is 3rem of icon with its label clipped, so the label has to reappear
+ * somewhere on hover. shadcn does that with its tooltip component, which
+ * belongs to the interactive bundle this application does not serve — so it is
+ * a span the row reveals, which is keyboard-reachable through :focus-within
+ * and has nothing to re-hydrate after a navigation.
+ *
+ * `data-collapsible` carries the mode only while collapsed, so the attribute
+ * selector alone is "collapsed to icons" and needs no second state check.
+ *
+ * The content pane clips its overflow while collapsed, to hide exactly these
+ * clipped labels; a tip positioned outside the 3rem column would be cut off by
+ * it. Made visible again here, which costs nothing: the labels are clipped by
+ * the button itself, and five steps never need to scroll. */
+[data-rail-tip] {
+  display: none;
+}
+
+[data-collapsible="icon"] [data-slot="sidebar-content"] {
+  overflow: visible;
+}
+
+[data-collapsible="icon"] [data-slot="sidebar-menu-item"]:hover > [data-rail-tip],
+[data-collapsible="icon"] [data-slot="sidebar-menu-item"]:focus-within > [data-rail-tip] {
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: calc(100% + .5rem);
+  z-index: 50;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  /* Its own border, because the tip and the rail it sits beside are the same
+   * colour and would otherwise read as one shape. */
+  border: 1px solid color-mix(in oklab, var(--chrome-foreground) 18%, transparent);
+  background: var(--chrome);
+  color: var(--chrome-foreground);
+  padding: .25rem .5rem;
+  font-size: .75rem;
+  line-height: 1rem;
+  box-shadow: 0 4px 12px -4px oklch(0 0 0 / 35%);
+  pointer-events: none;
+}
+
+/* Fourth, small windows. The component hides its desktop container below md
+ * and moves the content into a sheet, which needs the interactive bundle this
+ * application does not serve — so below md the sidebar would simply not be
+ * there, with no way to reach a step. Showing the container at every width
+ * gives the collapsed icon rail instead, which is 3rem and works in a narrow
+ * window; the sheet that would have held it is inert markup and is hidden. */
+@media (max-width: 767px) {
+  [data-tui-sidebar-wrapper] {
+    display: block;
+  }
+
+  [data-slot="sidebar-container"] {
+    display: flex;
+  }
+
+  [data-slot="sidebar"][data-mobile="true"] {
     display: none;
   }
 }

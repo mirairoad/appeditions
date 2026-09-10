@@ -20,6 +20,12 @@ import (
 // because it depends on the route: the active nav row is computed per render,
 // and markup in the shell is rendered once on a cold load and then frozen for
 // every local navigation after it.
+//
+// The bar is the same dark neutral the workspace sidebar is — one `--chrome`
+// pair, not two values meant to match — so the two meet with no seam and the
+// chrome reads as a frame around a white page. Opaque rather than translucent
+// and blurred: the sidebar underneath it is a solid colour, and a bar that
+// tinted where they overlap would show the join it exists to hide.
 func Layout() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -41,7 +47,7 @@ func Layout() templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex min-h-screen flex-col\"><header class=\"sticky top-0 z-20 flex h-14 items-center gap-6 border-b border-border/70 bg-background/80 px-5 backdrop-blur\"><a href=\"/\" class=\"flex items-center gap-2 text-sm font-semibold tracking-tight\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex min-h-screen flex-col\"><header class=\"sticky top-0 z-20 flex h-14 items-center gap-6 bg-chrome px-5 text-chrome-foreground\"><a href=\"/\" class=\"flex items-center gap-2 text-sm font-semibold tracking-tight\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -85,6 +91,10 @@ func Layout() templ.Component {
 	})
 }
 
+// The current row is a light chip rather than the accent. The accent means the
+// step you are on and the primary action, and a blue chip up here beside a blue
+// row in the sidebar would be the same statement made twice.
+//
 // navLink marks the current row with aria-current and styles from it, rather
 // than from a class computed at render time — one source of truth for "this is
 // where you are", and the one screen readers already read.
@@ -116,13 +126,13 @@ func navLink(path string, label string, icon string) templ.Component {
 		var templ_7745c5c3_Var3 templ.SafeURL
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(path))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 41, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 51, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground aria-[current=page]:bg-secondary aria-[current=page]:text-foreground\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" class=\"inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-chrome-foreground/70 transition-colors hover:bg-chrome-foreground/10 hover:text-chrome-foreground aria-[current=page]:bg-chrome-foreground/15 aria-[current=page]:text-chrome-foreground\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -143,7 +153,7 @@ func navLink(path string, label string, icon string) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 48, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 58, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -157,12 +167,18 @@ func navLink(path string, label string, icon string) templ.Component {
 	})
 }
 
-// isCurrent uses router.Under for everything but the root, so /projects/abc
-// keeps the Projects row lit while `/` does not claim every page in the app.
+// isCurrent answers the framework's own question, in the framework's own terms.
+//
+// howl's runtime re-applies aria-current to every same-origin link after each
+// load — `path === here`, or `here` starting with `path + "/"` for everything
+// except "/" — and it *removes* the attribute where that is false. A server
+// that lit "Projects" inside a project therefore painted it active and had the
+// runtime take it away a frame later: a highlight that flashed on every
+// navigation. Disagreeing with the runtime is not a thing this can win, so it
+// agrees instead. Inside a project the workspace has its own rail anyway.
 func isCurrent(ctx context.Context, path string) bool {
 	if path == "/" {
-		current := router.Current(ctx)
-		return current == "/" || len(current) >= 9 && current[:9] == "/projects"
+		return router.Current(ctx) == "/"
 	}
 	return router.Under(ctx, path)
 }

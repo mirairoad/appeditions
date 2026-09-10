@@ -72,7 +72,7 @@ func Run(ctx context.Context, s *store.Store, p model.Project, locales, sizeIDs 
 			widest = w
 		}
 	}
-	sources, err := loadSources(ctx, s, p, widest)
+	sources, err := loadSources(ctx, s, p, locales, widest)
 	if err != nil {
 		return Result{}, err
 	}
@@ -208,7 +208,7 @@ func renderTile(p model.Project, locale string, size model.ExportSize, sources m
 	defer func() { <-sem }()
 
 	img := render.Scene(size.W, size.H, t.screen, p.Settings,
-		t.screen.Text(locale, p.BaseLocale), neighbours(p, sources, t.screen.ID))
+		t.screen.Text(locale, p.BaseLocale), neighbours(p, sources, t.screen.ID, locale))
 
 	// A span-2 composition is drawn once at double width and cut here, so the
 	// seam is exact rather than two renders that nearly line up. Both halves
@@ -232,7 +232,7 @@ var sem = make(chan struct{}, runtime.NumCPU())
 // Compositions, not screens. A panorama's second half holds a copy of the
 // first's screenshot, so walking the raw list would make a screen its own
 // neighbour and a trio would draw the same picture twice.
-func neighbours(p model.Project, sources map[string]image.Image, screenID string) render.Sources {
+func neighbours(p model.Project, sources map[string]image.Image, screenID, locale string) render.Sources {
 	leads := p.Leads()
 	i := p.LeadIndex(screenID)
 	at := func(j int) image.Image {
@@ -240,7 +240,10 @@ func neighbours(p model.Project, sources map[string]image.Image, screenID string
 			return nil
 		}
 		j = ((j % len(leads)) + len(leads)) % len(leads)
-		return sources[leads[j].AssetID]
+		// This language's capture of that neighbour, not the base one: a
+		// two-device arrangement beside a German tile would otherwise draw
+		// English inside the same picture.
+		return sources[leads[j].Asset(locale)]
 	}
 	return render.Sources{
 		model.SourceSelf: at(i),
@@ -249,9 +252,15 @@ func neighbours(p model.Project, sources map[string]image.Image, screenID string
 	}
 }
 
-// loadSources decodes every screenshot once. Decoding per tile would decode a
-// panorama's source twice and a trio's three times.
-func loadSources(ctx context.Context, s *store.Store, p model.Project, targetW int) (map[string]image.Image, error) {
+// loadSources decodes every screenshot once, keyed by asset id. Decoding per
+// tile would decode a panorama's source twice and a trio's three times — and
+// now also once per language, which for a set localised in ten is the same
+// picture read ten times.
+//
+// Every language's captures, in one map: most screens draw the base one in all
+// of them, so the ids collapse and only the localised screens cost anything
+// extra.
+func loadSources(ctx context.Context, s *store.Store, p model.Project, locales []string, targetW int) (map[string]image.Image, error) {
 	assets, err := s.AssetsOf(ctx, p.ID)
 	if err != nil {
 		return nil, err
@@ -263,18 +272,21 @@ func loadSources(ctx context.Context, s *store.Store, p model.Project, targetW i
 
 	out := map[string]image.Image{}
 	for _, screen := range p.Screens() {
-		if screen.AssetID == "" || out[screen.AssetID] != nil {
-			continue
+		for _, locale := range locales {
+			id := screen.Asset(locale)
+			if id == "" || out[id] != nil {
+				continue
+			}
+			asset, ok := byID[id]
+			if !ok {
+				continue
+			}
+			img, err := s.Source(p, asset, targetW)
+			if err != nil {
+				return nil, err
+			}
+			out[id] = img
 		}
-		asset, ok := byID[screen.AssetID]
-		if !ok {
-			continue
-		}
-		img, err := s.Source(p, asset, targetW)
-		if err != nil {
-			return nil, err
-		}
-		out[screen.AssetID] = img
 	}
 	return out, nil
 }

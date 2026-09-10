@@ -6,14 +6,24 @@ import (
 	"strings"
 
 	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/sidebar"
 	"github.com/mirairoad/howl-go/core/router"
 
 	"github.com/mirairoad/appeditions/client/ui"
 	"github.com/mirairoad/appeditions/client/view"
 )
 
-// The project workspace: the rail on the left, the step on the right, and one
-// status line across the bottom.
+// The project workspace: the sidebar on the left, the step on the right.
+//
+// The sidebar is shadcn-templ's, not markup of its own. Collapsing, the icon
+// rail, the width variables and the active row are all in the component; what
+// this adds is where it sits and what is in it.
+//
+// It is fixed below the top bar and runs to the bottom of the window, so it
+// behaves the way the top bar does — the page scrolls underneath it and the
+// sidebar does not move. `top-14`/`h-[calc(100svh-3.5rem)]` are marked
+// important because the component pins itself to `inset-y-0 h-svh`, which
+// would put it *over* the 3.5rem bar rather than under it.
 //
 // The rail is navigation and never a gate. The steps are in the order the
 // decisions depend on — the look shapes the slots, the slots take the
@@ -22,81 +32,93 @@ import (
 // filled is not doing it wrong.
 templ Layout() {
 	{{ e := view.EditorOf(ctx) }}
-	<div class="mx-auto flex w-full max-w-[110rem] gap-8 px-5 py-8">
-		<!-- The rail as a drawer below lg. A checkbox and sibling selectors, so
-		     nothing here is JavaScript and nothing has to be re-hydrated after a
-		     navigation. -->
-		<input type="checkbox" id="rail" data-rail class="peer sr-only"/>
-		<label
-			for="rail"
-			data-rail-scrim
-			class="fixed inset-0 z-30 bg-black/40 lg:hidden"
-			aria-label="Close the steps"
-		></label>
-		<aside
-			data-rail-body
-			class="fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto rounded-none border-r border-border bg-sidebar p-4 lg:sticky lg:top-20 lg:z-auto lg:h-fit lg:w-64 lg:shrink-0 lg:rounded-xl lg:border lg:border-border"
-		>
-			<div class="mb-5">
-				<a href="/" class="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-					@ui.Icon("back", "size-3.5")
-					Projects
-				</a>
+	{{ step := currentStep(ctx, e.Project.ID) }}
+	{{ path := ui.StepPath(e.Project.ID, step) }}
+	@sidebar.Provider(sidebar.ProviderProps{
+		ID: "workspace",
+		// The state is a cookie, read on the way in. A local navigation
+		// replaces #outlet wholesale, so this whole sidebar is re-rendered on
+		// every step change — a collapsed state living only in the DOM would
+		// spring back open each time.
+		DisableDefaultOpen: view.RequestOf(ctx).SidebarCollapsed,
+		Class:              "min-h-[calc(100svh-3.5rem)]!",
+	}) {
+		@sidebar.Sidebar(sidebar.Props{
+			Collapsible: sidebar.CollapsibleIcon,
+			Class:       "top-14! h-[calc(100svh-3.5rem)]!",
+		}) {
+			@sidebar.Header(sidebar.HeaderProps{Class: "gap-3"}) {
+				<div class="flex items-center gap-2">
+					@sidebar.Trigger(sidebar.TriggerProps{Class: "shrink-0 text-sidebar-foreground hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"})
+					<a
+						href="/"
+						class="inline-flex min-w-0 items-center gap-1 text-xs text-sidebar-foreground/70 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+					>
+						@ui.Icon("back", "size-3.5")
+						Projects
+					</a>
+				</div>
 				<div class="flex items-center gap-2.5">
 					@ui.ProjectIcon(e.Project, "size-9")
-					<div class="min-w-0 flex-1">
-						<h1 class="truncate text-lg font-semibold tracking-tight">{ e.Project.Name }</h1>
-						<p class="text-xs text-muted-foreground">{ sizeLabel(e) }</p>
+					<div class="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+						<h1 class="truncate text-sm font-semibold tracking-tight">{ e.Project.Name }</h1>
+						<p class="truncate text-xs text-sidebar-foreground/70">{ sizeLabel(e) }</p>
 					</div>
 					<button
 						type="button"
-						class="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+						class="shrink-0 rounded-md p-1.5 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
 						aria-label="Project settings"
 						data-panel-toggle={ ui.ProjectSettingsID(e.Project.ID) }
 					>
 						@ui.Icon("edit", "size-4")
 					</button>
 				</div>
-			</div>
-			@ui.Rail(e, currentStep(ctx, e.Project.ID))
-			<!-- What the editor is being *looked at* in: the store slot and
-			     the language. Both are links rather than controls — they are
-			     part of which page you are on, so a reload, a bookmark and the
-			     back button all have to keep them — and both live here rather
-			     than on a page, because every step is drawn in one of each and
-			     a switcher that moved between steps would read as a different
-			     question each time. -->
-			<div class="mt-5 space-y-3 border-t border-border/70 pt-4">
-				<p class="text-xs font-medium">Showing</p>
-				<!-- Version first: it owns the screens, and the other two only
-				     say how this version is being looked at. -->
-				@ui.VersionSelect(e, ui.StepPath(e.Project.ID, currentStep(ctx, e.Project.ID)))
-				@ui.SizeTabs(e, ui.StepPath(e.Project.ID, currentStep(ctx, e.Project.ID)))
-				@ui.LocaleSelect(e, ui.StepPath(e.Project.ID, currentStep(ctx, e.Project.ID)))
-			</div>
-			<div class="mt-6 border-t border-border/70 pt-4">
+			}
+			@sidebar.Content() {
+				@sidebar.Group() {
+					@sidebar.GroupLabel() {
+						Steps
+					}
+					@sidebar.GroupContent() {
+						@ui.Rail(e, step)
+					}
+				}
+				<!-- What the editor is being *looked at* in: the version, the
+				     store slot and the language. All three are links rather
+				     than controls — they are part of which page you are on, so
+				     a reload, a bookmark and the back button all have to keep
+				     them — and they live here rather than on a page, because
+				     every step is drawn in one of each and a switcher that
+				     moved between steps would read as a different question
+				     each time.
+
+				     Hidden rather than squeezed at icon width: a <select> has
+				     no useful 32px form, and the sidebar is one click from
+				     open. -->
+				@sidebar.Group(sidebar.GroupProps{Class: "group-data-[collapsible=icon]:hidden"}) {
+					@sidebar.GroupLabel() {
+						Showing
+					}
+					@sidebar.GroupContent(sidebar.GroupContentProps{Class: "space-y-3 px-2 pt-1"}) {
+						<!-- Version first: it owns the screens, and the other
+						     two only say how this version is being looked at. -->
+						@ui.VersionSelect(e, path)
+						@ui.SizeTabs(e, path)
+						@ui.LocaleSelect(e, path)
+					}
+				}
+			}
+			@sidebar.Footer(sidebar.FooterProps{Class: "gap-3 border-t border-sidebar-border"}) {
 				@statusLine(e)
-			</div>
-		</aside>
-		<div class="min-w-0 flex-1">
-			<div class="mb-4 flex items-center gap-3 lg:hidden">
-				<button
-					type="button"
-					class="inline-flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-					aria-controls="rail"
-					data-panel-toggle="rail"
-				>
-					@ui.Icon("menu", "size-4")
-					Steps
-				</button>
-				<span class="truncate text-sm font-medium">{ e.Project.Name }</span>
-			</div>
+				@updateNotice()
+			}
+		}
+		<div class="min-w-0 flex-1 px-5 py-8">
 			{ children... }
 		</div>
-	</div>
+	}
 	<!-- One per project workspace, so every step can open it by id. Outside
-	     the layout's flex row because it is fixed-position chrome, not a
-	     column. -->
+	     the sidebar because it is fixed-position chrome, not a column. -->
 	@ui.ProjectSettings(e.Project, e.Locales, e.Sizes, e.Devices)
 }
 
@@ -117,6 +139,35 @@ func sizeLabel(e view.Editor) string {
 	return e.Project.Settings.SizeID
 }
 
+// updateNotice is the one place this application mentions itself.
+//
+// Drawn only when the background check has actually seen a newer commit, so
+// there is nothing here on a machine with no network, on a build with no
+// commit stamped in it, or when this is the head of main.
+//
+// It runs the project's own update.sh: fetch, build from source, reinstall.
+// That takes about a minute and ends by replacing the application this button
+// is in, which is why it asks first and why the answer it reports is "quit and
+// reopen" rather than "done".
+templ updateNotice() {
+	{{ u := view.ShellOf(ctx).Update }}
+	if u.Behind {
+		@button.Button(button.Props{
+			Size:  button.SizeSm,
+			Class: "w-full border border-sidebar-foreground/40 bg-transparent text-sidebar-foreground hover:bg-sidebar-foreground/10",
+			Attributes: templ.Attributes{
+				"data-action":  "/api/update",
+				"data-body":    "{}",
+				"data-confirm": "Update AppEditions to " + u.Latest + "?\n\nThis rebuilds it from source — about a minute — and replaces the installed app. Your projects are not touched.",
+				"title":        "This build is behind " + u.Latest,
+			},
+		}) {
+			@ui.Icon("upload", "size-4")
+			<span class="group-data-[collapsible=icon]:hidden">Update available</span>
+		}
+	}
+}
+
 // statusLine is the one reading of how far along the set is. The rail, this
 // and the review page all read the same [model.Readiness]; a second count
 // would eventually disagree, and the disagreement would be about whether the
@@ -124,58 +175,68 @@ func sizeLabel(e view.Editor) string {
 templ statusLine(e view.Editor) {
 	{{ r := e.Readiness }}
 	<div class="space-y-2 text-xs">
-		if r.Total == 0 {
-			<p class="text-muted-foreground">No screens yet.</p>
-		} else {
-			<p class="flex items-center justify-between">
-				<span class="text-muted-foreground">Screenshots</span>
-				if r.MissingShots == 0 {
-					<span class="text-success">all { strconv.Itoa(r.Total) }</span>
-				} else {
-					<span class="text-warning">{ strconv.Itoa(r.Filled) } of { strconv.Itoa(r.Total) }</span>
-				}
-			</p>
-			<p class="flex items-center justify-between">
-				<span class="text-muted-foreground">Headlines</span>
-				if r.MissingCopy == 0 {
-					<span class="text-success">written</span>
-				} else {
-					<span class="text-warning">{ strconv.Itoa(r.MissingCopy) } missing</span>
-				}
-			</p>
-			<p class="flex items-center justify-between">
-				<span class="text-muted-foreground">Store tiles</span>
+		<div class="group-data-[collapsible=icon]:hidden">
+			if r.Total == 0 {
+				<p class="text-sidebar-foreground/70">No screens yet.</p>
+			} else {
+				@statusRow("Screenshots", strconv.Itoa(r.Filled)+" of "+strconv.Itoa(r.Total), "all "+strconv.Itoa(r.Total), r.MissingShots == 0)
+				@statusRow("Headlines", strconv.Itoa(r.MissingCopy)+" missing", "written", r.MissingCopy == 0)
 				if r.OverLimit {
-					<span class="text-warning">{ strconv.Itoa(r.Tiles) } — { r.Store } takes { strconv.Itoa(r.Max) }</span>
+					@statusRow("Store tiles", strconv.Itoa(r.Tiles)+" — "+r.Store+" takes "+strconv.Itoa(r.Max), "", false)
 				} else if r.UnderMin {
-					<span class="text-warning">{ strconv.Itoa(r.Tiles) } — { r.Store } needs { strconv.Itoa(r.Min) }</span>
+					@statusRow("Store tiles", strconv.Itoa(r.Tiles)+" — "+r.Store+" needs "+strconv.Itoa(r.Min), "", false)
 				} else {
-					<span>{ strconv.Itoa(r.Tiles) }</span>
-				}
-			</p>
-		}
-		<div class="pt-1">
-			@button.Button(button.Props{
-				Size:     button.SizeSm,
-				Class:    "w-full",
-				Href:     ui.StepPath(e.Project.ID, "export"),
-				Variant:  exportVariant(r.CanExport),
-				Disabled: false,
-			}) {
-				@ui.Icon("export", "size-4")
-				if r.CanExport {
-					Export
-				} else {
-					Review
+					@statusRow("Store tiles", "", strconv.Itoa(r.Tiles), true)
 				}
 			}
 		</div>
+		@button.Button(button.Props{
+			Size:  button.SizeSm,
+			Class: exportClass(r.CanExport),
+			Href:  ui.StepPath(e.Project.ID, "export"),
+			Attributes: templ.Attributes{
+				"title": exportLabel(r.CanExport),
+			},
+		}) {
+			@ui.Icon("export", "size-4")
+			<span class="group-data-[collapsible=icon]:hidden">{ exportLabel(r.CanExport) }</span>
+		}
 	</div>
 }
 
-func exportVariant(ready bool) button.Variant {
-	if ready {
-		return button.VariantDefault
-	}
-	return button.VariantOutline
+// statusRow is one reading. Amber survives on a coloured sidebar — it is the
+// one hue far enough from the accent to read against it — while "done" is the
+// absence of a warning rather than a second colour, because green on the
+// accent is a colour nobody can name.
+templ statusRow(label, warn, done string, ok bool) {
+	<p class="flex items-center justify-between gap-2">
+		<span class="text-sidebar-foreground/70">{ label }</span>
+		if ok {
+			<span class="truncate text-sidebar-foreground">{ done }</span>
+		} else {
+			<span class="truncate rounded bg-warning px-1.5 py-0.5 font-medium text-warning-foreground">{ warn }</span>
+		}
+	</p>
 }
+
+func exportLabel(ready bool) string {
+	if ready {
+		return "Export"
+	}
+	return "Review"
+}
+
+// exportClass names the colours rather than taking the button's variants,
+// because the variants are drawn for the page and this sits on the sidebar's
+// dark field: VariantOutline's border and VariantDefault's hover are both
+// mixed against the page background and disappear here.
+//
+// The accent when the set can go, and an outline when it cannot — the same two
+// states the variants would have expressed.
+func exportClass(ready bool) string {
+	if ready {
+		return "w-full bg-primary text-primary-foreground hover:bg-primary/90"
+	}
+	return "w-full border border-sidebar-foreground/40 bg-transparent text-sidebar-foreground hover:bg-sidebar-foreground/10"
+}
+

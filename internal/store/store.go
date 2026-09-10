@@ -139,6 +139,7 @@ type Store struct {
 	Assets    *sqlite.Service[Asset, *Asset]
 
 	images imageCache
+	icons  byteCache
 }
 
 // DefaultRoot is ~/.appeditions, or $APPEDITIONS_HOME when it is set. Everything the
@@ -233,6 +234,18 @@ func (s *Store) ExportDir(p model.Project, locale, sizeID string) string {
 // from and the path the interface names as the backup.
 func (s *Store) ExportsDir(p model.Project) string {
 	return filepath.Join(s.dir(p), "exports")
+}
+
+// TemplateDir is where one template keeps the screenshots it was designed
+// against.
+//
+// Beside the projects rather than inside one, because a template outlives the
+// project it was saved from: it is applied to the next app, and a set of
+// pictures living under a project directory would go when that project did.
+// Named after the row id, so nothing has to be moved when a template is
+// renamed.
+func (s *Store) TemplateDir(id string) string {
+	return filepath.Join(s.root, "templates", id)
 }
 
 // seedTemplates writes the built-ins if they are missing and restores them if

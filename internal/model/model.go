@@ -347,7 +347,17 @@ func (c Copy) Empty() bool {
 type Screen struct {
 	ID string `json:"id"`
 	// AssetID is the stored original screenshot; "" while the slot is empty.
+	// It is the base language's capture, and every language draws it unless
+	// Shots names another.
 	AssetID string `json:"asset_id"`
+	// Shots is a per-language screenshot, keyed by locale tag, for the case
+	// AssetID cannot cover: the picture is of the app, and a Japanese listing
+	// showing an English UI is not the app anyone is downloading.
+	//
+	// Absent means inherit, the way a nil override does. A project that ships
+	// one set of captures never writes this, and a project that localises two
+	// screens out of six writes two entries rather than a full second set.
+	Shots map[string]string `json:"shots,omitempty"`
 	// Copy is keyed by locale tag. A locale with no entry falls back to the
 	// project's base locale, so adding a language never blanks the preview.
 	Copy      map[string]Copy `json:"copy"`
@@ -381,6 +391,27 @@ func (s Screen) Text(locale, base string) Copy {
 	return s.Copy[base]
 }
 
+// Asset is the screenshot this screen draws in one language: its own capture
+// for that locale, or the base language's.
+//
+// Resolved here and nowhere else, for the reason overrides are resolved in one
+// place — the exporter loads these bytes and [PreviewTag] hashes this id, and
+// two walks that disagreed would pin a stale tile behind an immutable URL.
+func (s Screen) Asset(locale string) string {
+	if id := s.Shots[locale]; id != "" {
+		return id
+	}
+	return s.AssetID
+}
+
+// Localised reports whether this screen has its own capture in a language,
+// rather than drawing the base one. What the picker uses to say which of the
+// two a tile is showing.
+func (s Screen) Localised(locale string) bool { return s.Shots[locale] != "" }
+
+// Filled is whether the slot has a picture at all, which is the base capture:
+// a language-specific shot is a replacement for one, never the only one, so a
+// screen with nothing base is an empty slot however many locales it names.
 func (s Screen) Filled() bool { return s.AssetID != "" }
 
 // A RhythmStep is which composition a tile takes. Applied as overrides by
@@ -415,6 +446,16 @@ func (r Rhythm) Step(i int) *RhythmStep {
 type Sample struct {
 	Headline string `json:"headline"`
 	Subhead  string `json:"subhead"`
+	// Shot is the screenshot this slot was designed against, kept with the
+	// template as a file of its own and named relative to the template's
+	// directory. "" when the slot was empty when the template was saved.
+	//
+	// A look is not separable from the pictures it was judged on — a headline
+	// sits where it does because of what was behind it — so a template that
+	// kept the words and threw the captures away came back as a layout nobody
+	// could evaluate. The store copies these in on apply as ordinary assets,
+	// which is what lets them be replaced one at a time afterwards.
+	Shot string `json:"shot,omitempty"`
 }
 
 // A Template is a complete look: a settings preset plus optional per-screen
@@ -441,7 +482,12 @@ type Template struct {
 	// Variants[i % len] is pinned on screen i.
 	Variants []Overrides `json:"variants,omitempty"`
 	// Rhythm the variants follow, for the picker. "" = the template's own.
-	Rhythm  string   `json:"rhythm,omitempty"`
+	Rhythm string `json:"rhythm,omitempty"`
+	// Locale is the language the samples are written in: the base language of
+	// the project this was saved from, which is "en-US" unless it was changed.
+	// Recorded rather than assumed, because a template saved from a Japanese
+	// project carries Japanese words and the picker should say so.
+	Locale  string   `json:"locale,omitempty"`
 	Samples []Sample `json:"samples"`
 	// Builtin templates ship with the app. They can be duplicated but the
 	// originals are restored on every start, so a bad edit is one restart away

@@ -1091,7 +1091,7 @@ func coverTag(item view.ProjectCard) string {
 	if !ok {
 		return ""
 	}
-	return model.PreviewTag(item.Project, *screen, screen.Text(item.Project.BaseLocale, item.Project.BaseLocale), 160)
+	return model.PreviewTag(item.Project, *screen, item.Project.BaseLocale, screen.Text(item.Project.BaseLocale, item.Project.BaseLocale), 160)
 }
 
 var _ = templruntime.GeneratedTemplate

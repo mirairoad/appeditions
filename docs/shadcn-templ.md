@@ -30,7 +30,9 @@ Static components are ordinary `templ.Component`s. They work with howl-go cold S
 
 Interactive components use a shared vanilla-JavaScript bundle and DOM data attributes. AppEditions does not enable it: the v2 direct-import workflow is experimental, and its development handler looks for a locally copied `components/` directory. Dialog, select, popover, tooltip and similar controls are therefore off the table until a component is CLI-copied into the repo.
 
-Everything that has to be interactive here is either a native element driven by `forge.js` or a checkbox/radio with a sibling selector. That is not only a workaround: an overlay built from a checkbox has nothing to re-hydrate after a navigation, and a native `<select>` is keyboard- and screen-reader-correct for free.
+The one exception is **`sidebar`**, which the project workspace uses. Its desktop half is pure CSS driven by `data-state`/`data-collapsible` on the wrapper, so `forge.js` sets those two attributes and writes the same `sidebar_state` cookie the upstream script writes. Its mobile half — moving the content into a sheet — does need the bundle, so `app.css` shows the ordinary container below `md` instead. See the `appeditions-ui` skill.
+
+Everything else that has to be interactive here is either a native element driven by `forge.js` or a checkbox/radio with a sibling selector. That is not only a workaround: an overlay built from a checkbox has nothing to re-hydrate after a navigation, and a native `<select>` is keyboard- and screen-reader-correct for free.
 
 ## Universal component API
 

@@ -42,5 +42,6 @@ func FsApiRoutes() []api.Route {
 		api.At("POST", "/api/reveal", Reveal),
 		api.At("POST", "/api/templates/{id}/delete", e5.Delete),
 		api.At("POST", "/api/templates/{id}/duplicate", e5.Duplicate),
+		api.At("POST", "/api/update", Update),
 	}
 }

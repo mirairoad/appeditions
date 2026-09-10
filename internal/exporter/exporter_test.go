@@ -110,6 +110,112 @@ func TestExportWritesOneDirectoryPerLanguage(t *testing.T) {
 	}
 }
 
+// A screenshot is a picture of the app, so a Japanese listing showing an
+// English UI is not the app anyone is downloading. A screen may carry its own
+// capture per language, and every language without one draws the base — which
+// is what keeps "add Japanese" a non-destructive act.
+func TestALanguageCanHaveItsOwnScreenshots(t *testing.T) {
+	ctx := context.Background()
+	s, p := project(t)
+	size := presets.Size(p.Settings.SizeID)
+
+	if _, err := Run(ctx, s, p, nil, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	base := read(t, filepath.Join(s.ExportDir(p, "en-US", size.ID), first(t, s.ExportDir(p, "en-US", size.ID))))
+	before := read(t, filepath.Join(s.ExportDir(p, "ja", size.ID), first(t, s.ExportDir(p, "ja", size.ID))))
+	// Same picture, different words: the two files must already differ, or the
+	// comparison below proves nothing.
+	if bytes.Equal(base, before) {
+		t.Fatal("the two languages exported byte-identical tiles before any localised capture")
+	}
+
+	// A capture that is in the project but in no screen, given to Japanese
+	// alone.
+	japanese, err := s.PutAsset(ctx, p, "ja.png", shot(t, 99))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Edit(ctx, p.ID, func(p *model.Project) {
+		p.SetPicture(p.Screens()[0].ID, "ja", japanese.Doc.ID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(ctx, s, p, nil, nil, false); err != nil {
+		t.Fatal(err)
+	}
+
+	after := read(t, filepath.Join(s.ExportDir(p, "ja", size.ID), first(t, s.ExportDir(p, "ja", size.ID))))
+	if bytes.Equal(after, before) {
+		t.Error("the Japanese tile is unchanged — its own capture never reached the drawing")
+	}
+	// And the base language is untouched. A localised shot is an override, not
+	// a move: writing one must not take the picture out of every other
+	// language.
+	if again := read(t, filepath.Join(s.ExportDir(p, "en-US", size.ID), first(t, s.ExportDir(p, "en-US", size.ID)))); !bytes.Equal(again, base) {
+		t.Error("giving Japanese its own capture changed the English tile")
+	}
+}
+
+// An override of nothing is inherit, the same as it is for a tune control:
+// clearing a language's capture puts the tile back on the base one rather than
+// emptying a slot no language can fill.
+func TestClearingALocalisedShotFallsBackToTheBase(t *testing.T) {
+	ctx := context.Background()
+	s, p := project(t)
+
+	japanese, err := s.PutAsset(ctx, p, "ja.png", shot(t, 99))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Edit(ctx, p.ID, func(p *model.Project) {
+		p.SetPicture(p.Screens()[0].ID, "ja", japanese.Doc.ID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Screens()[0].Asset("ja"); got != japanese.Doc.ID {
+		t.Fatalf("Japanese draws %q, want its own capture", got)
+	}
+
+	p, err = s.Edit(ctx, p.ID, func(p *model.Project) {
+		p.SetPicture(p.Screens()[0].ID, "ja", "")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := p.Screens()[0]
+	if got, want := screen.Asset("ja"), screen.AssetID; got != want {
+		t.Errorf("Japanese draws %q after clearing, want the base capture %q", got, want)
+	}
+	if screen.Localised("ja") {
+		t.Error("the cleared entry is still in Shots — it pins the language to a value instead of inheriting")
+	}
+}
+
+// first is the earliest file in a directory, which is tile 01.
+func first(t *testing.T, dir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("%s is empty", dir)
+	}
+	return entries[0].Name()
+}
+
+func read(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestPanoramaIsSlicedIntoTiles(t *testing.T) {
 	ctx := context.Background()
 	s, p := project(t)

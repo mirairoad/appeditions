@@ -12,11 +12,19 @@ VERSION ?= 0.1.0
 APP_NAME := AppEditions
 APP_ID   := com.mirairoad.appeditions
 
+# The commit this binary was built from, stamped into it so the app can tell
+# whether it is behind the repository. That is the version that matters for
+# updates: there are no releases and no tags, install.sh builds whatever main
+# points at, and running it again is how you update. A tree with no git — a
+# source tarball — leaves it "dev" and the check does not run at all.
+COMMIT  := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo dev)
+LDFLAGS := -X $(MODULE)/boot.Version=$(VERSION) -X $(MODULE)/boot.Commit=$(COMMIT)
+
 # fsroutes -> fsapis -> templ -> build, always in that order. The route table
 # and the API table are generated into the tree that templ then compiles, so a
 # generate step out of order builds the previous revision's routes.
 all: generate
-	go build -o $(BIN) .
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) .
 
 generate: apis
 	go run github.com/mirairoad/howl-go/core/cmd/fsroutes -module $(MODULE)/client/pages
@@ -75,8 +83,11 @@ dev-web:
 
 # The window is a nested module: it needs cgo and a webview binding, so a
 # machine without WebKitGTK still builds everything else.
+#
+# The nested module links this one's boot package, so the same -X paths reach
+# it: the flags name a package, not a module.
 desktop: all
-	cd desktop && go build -o ../$(DESKTOP) .
+	cd desktop && go build -ldflags "$(LDFLAGS)" -o ../$(DESKTOP) .
 
 # The desktop binary as something the OS shows an icon for: a .app on macOS, a
 # .desktop entry plus hicolor PNGs and an install.sh on Linux. Both are written

@@ -21,6 +21,7 @@ import (
 	"github.com/mirairoad/appeditions/internal/presets"
 	"github.com/mirairoad/appeditions/internal/render"
 	"github.com/mirairoad/appeditions/internal/store"
+	"github.com/mirairoad/appeditions/internal/update"
 )
 
 // Loader turns a request into the values the pages read. Pages take no
@@ -29,6 +30,9 @@ import (
 type Loader struct {
 	Store   *store.Store
 	Version string
+	// Updates is the background check on whether this build is behind the
+	// repository. Optional: nil is a build that does not want to be asked.
+	Updates *update.Checker
 }
 
 // Data is app.Config.Data: called once per render, before the page.
@@ -56,7 +60,22 @@ func (l *Loader) shell() view.Shell {
 	for _, p := range ai.Available() {
 		providers = append(providers, view.Provider{ID: p.ID, Label: p.Label})
 	}
-	return view.Shell{Version: l.Version, Providers: providers, DataDir: l.Store.Root()}
+	shell := view.Shell{Version: l.Version, Providers: providers, DataDir: l.Store.Root()}
+	if l.Updates != nil {
+		if u := l.Updates.State(); u.Behind {
+			shell.Update = view.Update{Behind: true, Latest: short(u.Latest)}
+		}
+	}
+	return shell
+}
+
+// short is a commit as a person reads one. Seven characters, which is what
+// GitHub shows and what the build stamps.
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 func (l *Loader) projects(ctx context.Context) context.Context {
@@ -267,14 +286,23 @@ func assetUses(p model.Project) map[string]string {
 	// Which versions hold it, named, so a row that cannot be deleted says
 	// where to go and delete the screen instead.
 	in := map[string][]string{}
+	hold := func(id, version string) {
+		if id == "" {
+			return
+		}
+		held := in[id]
+		if len(held) == 0 || held[len(held)-1] != version {
+			in[id] = append(held, version)
+		}
+	}
 	for _, v := range p.Versions {
 		for _, screen := range v.Screens {
-			if screen.AssetID == "" {
-				continue
-			}
-			held := in[screen.AssetID]
-			if len(held) == 0 || held[len(held)-1] != v.Name {
-				in[screen.AssetID] = append(held, v.Name)
+			hold(screen.AssetID, v.Name)
+			// The per-language captures too, or a picture used only as the
+			// German shot of one screen lists as spare and offers a delete the
+			// store refuses.
+			for _, id := range screen.Shots {
+				hold(id, v.Name)
 			}
 		}
 	}

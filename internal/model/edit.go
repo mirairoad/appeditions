@@ -22,7 +22,11 @@ import (
 //
 // The export size and the device survive, because they are decisions about
 // where the set is going rather than what it looks like.
-func (p *Project) ApplyTemplate(t Template, newID func() string) {
+// shots are the template's own screenshots, already imported into this project
+// as assets, one per slot and "" where the template has none. They fill the
+// slots the project has nothing of its own for — a set the author has already
+// shot is never overwritten by the pictures a look was designed against.
+func (p *Project) ApplyTemplate(t Template, shots []string, newID func() string) {
 	v := p.version()
 
 	base := DefaultSettings()
@@ -62,7 +66,7 @@ func (p *Project) ApplyTemplate(t Template, newID func() string) {
 			screens = append(screens, s)
 			continue
 		}
-		screens = append(screens, p.emptySlot(t, i, newID()))
+		screens = append(screens, p.emptySlot(t, shots, i, newID()))
 	}
 	v.Screens = screens
 
@@ -81,13 +85,20 @@ func (p *Project) ApplyTemplate(t Template, newID func() string) {
 
 // emptySlot is a screen with no screenshot, carrying the template's sample
 // copy in the project's base language.
-func (p *Project) emptySlot(t Template, index int, id string) Screen {
+func (p *Project) emptySlot(t Template, shots []string, index int, id string) Screen {
 	sample := t.Sample(index)
-	return Screen{
+	s := Screen{
 		ID:        id,
 		Copy:      map[string]Copy{p.BaseLocale: {Headline: sample.Headline, Subhead: sample.Subhead}},
 		Overrides: t.Variant(index),
 	}
+	// Indexed, not cycled: the variants repeat down a longer set on purpose,
+	// but repeating the pictures would fill six slots with the same three
+	// screenshots and read as a bug.
+	if index < len(shots) {
+		s.AssetID = shots[index]
+	}
+	return s
 }
 
 // ApplyRhythm pins each screen's composition to the rhythm's step for its
@@ -264,11 +275,43 @@ func part(lead Screen, id string, i int) Screen {
 		// Cloned rather than shared. Two screens pointing at one map is a
 		// write to either showing up in both, which is right until the pair is
 		// broken up and then very wrong.
+		Shots:     maps.Clone(lead.Shots),
 		Copy:      maps.Clone(lead.Copy),
 		Overrides: lead.Overrides,
 		Of:        lead.ID,
 		Part:      i,
 	}
+}
+
+// SetPicture points a composition at an original, in one language.
+//
+// The base language writes the screen's own capture, which every other
+// language inherits; any other language writes an entry beside it. Clearing
+// under a translation therefore means "go back to the base picture" rather
+// than "empty the slot" — an override of nothing is inherit, the same as it is
+// for a tune control, and there is no such thing as a set that ships a
+// screenshot in English and a gap in German.
+//
+// Addressed to a part of a composition it writes the composition's, because a
+// panorama's halves are cut from one picture — writing it onto the half alone
+// would be undone by the sync that follows every edit.
+func (p *Project) SetPicture(screenID, locale, assetID string) {
+	s, ok := p.Lead(screenID)
+	if !ok {
+		return
+	}
+	if locale == "" || locale == p.BaseLocale {
+		s.AssetID = assetID
+		return
+	}
+	if assetID == "" {
+		delete(s.Shots, locale)
+		return
+	}
+	if s.Shots == nil {
+		s.Shots = map[string]string{}
+	}
+	s.Shots[locale] = assetID
 }
 
 // SetCopy writes one screen's words in one language. Addressed to a part of a
@@ -350,8 +393,14 @@ func (p *Project) AddLocale(tag string) {
 	p.Locales = append(p.Locales, tag)
 }
 
-// RemoveLocale drops a language and the copy written in it. The base language
-// cannot be removed — it is what every other one falls back to.
+// RemoveLocale drops a language, the copy written in it and the screenshots
+// captured for it. The base language cannot be removed — it is what every
+// other one falls back to.
+//
+// The shots go with the words. A language put back later is a language whose
+// captures are out of date anyway, and leaving them behind means the originals
+// list holds pictures nothing on screen can reach, which is exactly the state
+// the "in use" column exists to prevent.
 func (p *Project) RemoveLocale(tag string) {
 	v := p.version()
 
@@ -367,6 +416,7 @@ func (p *Project) RemoveLocale(tag string) {
 	p.Locales = out
 	for i := range v.Screens {
 		delete(v.Screens[i].Copy, tag)
+		delete(v.Screens[i].Shots, tag)
 	}
 }
 

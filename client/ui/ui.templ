@@ -6,6 +6,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/axadrn/shadcn-templ/v2/components/badge"
 	"github.com/axadrn/shadcn-templ/v2/components/button"
 	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/sidebar"
 	"github.com/axadrn/shadcn-templ/v2/components/textarea"
 
 	"github.com/mirairoad/appeditions/client/view"
@@ -90,33 +92,74 @@ const (
 // Rail is the flow. Every step is navigation, never a gate: any of them is one
 // click away at any time, because someone who wants to fix a headline before
 // filling the last slot is not doing it wrong.
+// It is shadcn-templ's sidebar menu rather than markup of its own, so the rows
+// collapse to their icons with the sidebar and pick up its active state — one
+// component, one set of rules, and nothing here to keep in step with it.
+//
+// The step's own icon, always, on nothing: a row is a place to go, and a
+// boxed icon that swapped itself for a tick made it look like a checklist you
+// had to complete in order. It is not one — every step is one click away at
+// any time.
+//
+// Status is one tint on that icon and nothing else. Amber means this step has
+// something outstanding; "done" is the absence of amber rather than a second
+// hue, and the accent stays reserved for the row you are on. The count that
+// says *what* is outstanding is in the footer, where it has room to say it.
 templ Rail(e view.Editor, current string) {
-	<nav class="flex flex-col gap-1" aria-label="Steps">
+	@sidebar.Menu() {
 		for _, step := range Steps {
 			{{ status := stepStatus(e, step.Slug) }}
-			<a
-				href={ templ.SafeURL(StepPath(e.Project.ID, step.Slug)) }
-				class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-secondary/60 aria-[current=page]:bg-secondary aria-[current=page]:text-foreground text-muted-foreground"
-				if step.Slug == current {
-					aria-current="page"
+			@sidebar.MenuItem() {
+				@sidebar.MenuButton(sidebar.MenuButtonProps{
+					Href:     StepPath(e.Project.ID, step.Slug),
+					IsActive: step.Slug == current,
+					Size:     sidebar.MenuButtonSizeLg,
+					// aria-current as well as the component's data-active: the
+					// data attribute is what style-nova paints, and this is
+					// what a screen reader reads and what howl's runtime
+					// re-applies after a navigation.
+					Attributes: stepAttrs(step, current),
+				}) {
+					@Icon(step.Icon, stepIconClass(status, step.Slug == current))
+					<span class="min-w-0 truncate font-medium">{ step.Label }</span>
 				}
-			>
-				<span
-					class={ "flex size-6 shrink-0 items-center justify-center rounded-md border",
-						templ.KV("border-success/40 bg-success/10 text-success", status == StatusDone),
-						templ.KV("border-warning/40 bg-warning/10 text-warning", status == StatusWarn),
-						templ.KV("border-border bg-secondary/50", status == StatusNeutral) }
-				>
-					if status == StatusDone {
-						@Icon("check", "size-3.5")
-					} else {
-						@Icon(step.Icon, "size-3.5")
-					}
-				</span>
-				<span class="min-w-0 truncate font-medium text-foreground">{ step.Label }</span>
-			</a>
+				<!-- The label again, for the collapsed rail. shadcn's own
+				     answer is its tooltip component, which needs the
+				     interactive bundle this application does not serve; this
+				     is a span the row reveals on hover, with nothing to
+				     re-hydrate after a navigation. aria-hidden because the
+				     button's own label is still in the DOM — clipped, not
+				     removed — so a screen reader already reads it and this
+				     would be the second copy. -->
+				<span data-rail-tip aria-hidden="true">{ step.Label }</span>
+			}
 		}
-	</nav>
+	}
+}
+
+// stepIconClass is the tint, and nothing more — no size, because the menu
+// button already sizes the svg it contains, and a second size class here would
+// be one more thing to keep in step with the component.
+//
+// The row you are on keeps its own colour whatever its status: it is already
+// the accent, and amber on the accent is the one pairing on this palette that
+// nobody can read.
+func stepIconClass(status StepStatus, current bool) string {
+	if status == StatusWarn && !current {
+		return "text-warning"
+	}
+	return ""
+}
+
+// stepAttrs is the row's current-ness, and only that.
+//
+// No `title`: the collapsed rail has its own label beside it, and a native
+// tooltip carrying the same words would arrive a second later underneath it.
+func stepAttrs(step Step, current string) templ.Attributes {
+	if step.Slug != current {
+		return templ.Attributes{}
+	}
+	return templ.Attributes{"aria-current": "page"}
 }
 
 // stepStatus reads the same [model.Readiness] the footer and the review page
@@ -201,7 +244,7 @@ func stepStatus(e view.Editor, slug string) StepStatus {
 templ Tile(e view.Editor, screen model.Screen, width int, class string) {
 	<img
 		src={ fmt.Sprintf("/api/preview/%s/%s?locale=%s&size=%s&w=%d&v=%s", e.Project.ID, screen.ID, e.Locale, e.Size.ID, width*2,
-			model.PreviewTag(e.Project, screen, screen.Text(e.Locale, e.Project.BaseLocale), width*2)) }
+			model.PreviewTag(e.Project, screen, e.Locale, screen.Text(e.Locale, e.Project.BaseLocale), width*2)) }
 		width={ strconv.Itoa(width) }
 		height={ strconv.Itoa(width * e.Size.H / e.Size.W) }
 		alt=""
@@ -210,6 +253,22 @@ templ Tile(e view.Editor, screen model.Screen, width int, class string) {
 		class={ "block h-auto w-full overflow-hidden rounded-xl tile-shadow", class,
 			templ.KV("slot-empty", !screen.Filled()) }
 	/>
+}
+
+// ShotOrigin marks a tile that is drawing the base language's screenshot while
+// a translation is being looked at.
+//
+// This is the whole reason per-language captures exist, made visible: the words
+// under the picture are Japanese and the picture is of an English app, and
+// nothing else on the page says so — the tile looks finished, because it is
+// finished in one language. Drawn only on a filled slot, because an empty one
+// has a louder problem already.
+templ ShotOrigin(e view.Editor, screen model.Screen) {
+	if e.Locale != e.Project.BaseLocale && screen.Filled() && !localised(e, screen) {
+		<span class="shrink-0 rounded bg-secondary px-1 text-[10px] text-muted-foreground" title={ "This tile draws the " + localeOf(e.Locales, e.Project.BaseLocale).Label + " screenshot. Give it one of its own with the swap button." }>
+			{ localeOf(e.Locales, e.Project.BaseLocale).Label } shot
+		</span>
+	}
 }
 
 // PickPictureID names one screen's picture picker.
@@ -230,7 +289,7 @@ func PickPictureID(screenID string) string { return "pick-" + screenID }
 // a tile can be repeated at another store size — and hiding used ones would
 // make that impossible while explaining nothing.
 templ PickPicture(e view.Editor, screen model.Screen) {
-	@Modal(PickPictureID(screen.ID), pickTitle(screen), pickHint(e, screen), pickActions(e, screen)) {
+	@Modal(PickPictureID(screen.ID), pickTitle(e, screen), pickHint(e, screen), pickActions(e, screen)) {
 		if len(e.Assets) == 0 {
 			@Empty("No pictures yet", "Add some with Choose files, and they land here for every tile to use.")
 		} else {
@@ -244,7 +303,7 @@ templ PickPicture(e view.Editor, screen model.Screen) {
 								templ.KV("border-primary", chosen),
 								templ.KV("border-transparent hover:border-primary/50", !chosen) }
 							data-action={ "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/picture" }
-							data-body={ `{"asset_id":"` + a.ID + `"}` }
+							data-body={ pickBody(e, a.ID) }
 							aria-pressed={ strconv.FormatBool(chosen) }
 						>
 							<img
@@ -268,16 +327,23 @@ templ PickPicture(e view.Editor, screen model.Screen) {
 
 templ pickActions(e view.Editor, screen model.Screen) {
 	<div class="flex items-center gap-2">
-		if pictureOf(e, screen) != "" {
+		// Clearing means something different in each language, and under a
+		// translation with nothing of its own it means nothing at all — the
+		// tile is already drawing the base capture, so there is no button.
+		if clears(e, screen) {
 			@button.Button(button.Props{
 				Variant: button.VariantOutline,
 				Size:    button.SizeSm,
 				Attributes: templ.Attributes{
 					"data-action": "/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/picture",
-					"data-body":   `{"asset_id":""}`,
+					"data-body":   pickBody(e, ""),
 				},
 			}) {
-				Empty this slot
+				if localised(e, screen) {
+					{ "Go back to the " + localeOf(e.Locales, e.Project.BaseLocale).Label + " picture" }
+				} else {
+					Empty this slot
+				}
 			}
 		}
 		<span class="flex-1"></span>
@@ -288,29 +354,75 @@ templ pickActions(e view.Editor, screen model.Screen) {
 	</div>
 }
 
-// pictureOf is the original this tile draws, resolved through the lead: a
-// panorama's halves share one picture, so the right tile shows the left tile's
-// choice as chosen — which is true, and the alternative is a picker that says
-// nothing is selected on half the cards.
+// pictureOf is the original this tile draws in the language being looked at,
+// resolved through the lead: a panorama's halves share one picture, so the
+// right tile shows the left tile's choice as chosen — which is true, and the
+// alternative is a picker that says nothing is selected on half the cards.
 func pictureOf(e view.Editor, screen model.Screen) string {
 	if lead, ok := e.Project.Lead(screen.ID); ok {
-		return lead.AssetID
+		return lead.Asset(e.Locale)
 	}
-	return screen.AssetID
+	return screen.Asset(e.Locale)
 }
 
-func pickTitle(screen model.Screen) string {
+// localised reports whether this tile has its own capture in the language
+// being looked at, rather than drawing the base language's.
+func localised(e view.Editor, screen model.Screen) bool {
+	if e.Locale == e.Project.BaseLocale {
+		return false
+	}
+	if lead, ok := e.Project.Lead(screen.ID); ok {
+		return lead.Localised(e.Locale)
+	}
+	return screen.Localised(e.Locale)
+}
+
+// clears is whether there is anything for the picker's clear button to do:
+// emptying the slot in the base language, or dropping this language's own
+// capture back to the base one.
+func clears(e view.Editor, screen model.Screen) bool {
+	if e.Locale != e.Project.BaseLocale {
+		return localised(e, screen)
+	}
+	return pictureOf(e, screen) != ""
+}
+
+// pickBody is what the picker posts: an asset, and the language to put it in.
+// Every assignment carries the locale, so choosing a picture while looking at
+// Japanese writes the Japanese capture and leaves the base one alone.
+func pickBody(e view.Editor, assetID string) string {
+	body, err := json.Marshal(map[string]string{"asset_id": assetID, "locale": e.Locale})
+	if err != nil {
+		return `{"asset_id":""}`
+	}
+	return string(body)
+}
+
+func pickTitle(e view.Editor, screen model.Screen) string {
+	if e.Locale != e.Project.BaseLocale {
+		return "The picture in " + localeOf(e.Locales, e.Locale).Label
+	}
 	if screen.Filled() {
 		return "Replace the picture"
 	}
 	return "Fill this slot"
 }
 
+// pickHint says which language is being set, because that is the part of this
+// dialog that is not visible in it: the same modal on the same tile writes a
+// different field depending on the language selected two panels away, and a
+// picker that did not say so would look like it had silently replaced the
+// English capture.
 func pickHint(e view.Editor, screen model.Screen) string {
 	if screen.Follows() || spans(e, screen) {
 		return "This tile is half of a two-tile composition — one picture, cut in two, so this sets both."
 	}
-	return "From the pictures this project already holds."
+	if e.Locale != e.Project.BaseLocale {
+		return "A screenshot of the app in " + localeOf(e.Locales, e.Locale).Label +
+			". Without one, this tile draws the " + localeOf(e.Locales, e.Project.BaseLocale).Label +
+			" capture under translated words."
+	}
+	return "From the pictures this project already holds. Every language draws it unless it has one of its own."
 }
 
 // MediaID names the panel listing a project's uploaded originals.
@@ -499,7 +611,7 @@ func ScreenName(e view.Editor, screen model.Screen) string {
 		lead = *l
 	}
 	for _, a := range e.Assets {
-		if a.ID == lead.AssetID {
+		if a.ID == lead.Asset(e.Locale) {
 			return a.Name
 		}
 	}
@@ -590,14 +702,29 @@ templ Modal(id string, title string, hint string, footer templ.Component) {
 // looks right at 32px in the rail and 48px on a card.
 templ ProjectIcon(p model.Project, class string) {
 	if p.IconAssetID != "" {
+		<!-- Eager, and decoded synchronously. Both matter for the same reason:
+		     a navigation replaces #outlet, so this is a brand-new <img> on
+		     every step change, and the bytes being in cache is not enough to
+		     make it paint in the same frame. `loading="lazy"` defers the load
+		     to a later task even for an image that is already on screen, and
+		     the default `decoding="async"` hands the decode off — either one
+		     leaves a frame with a hole where the icon is, which is the blink
+		     the immutable cache header on the endpoint was already half of the
+		     fix for.
+		
+		     No fetchpriority: the bytes are in cache by the time this matters,
+		     and the projects page is a grid of these — raising all of them
+		     would only make them compete with each other. -->
 		<img
 			src={ "/api/projects/" + p.ID + "/icon?v=" + p.IconAssetID }
 			alt=""
-			loading="lazy"
+			data-project-icon
+			decoding="sync"
 			class={ "shrink-0 rounded-[22%] border border-border/70 object-cover", class }
 		/>
 	} else {
 		<span
+			data-project-icon
 			class={ "flex shrink-0 items-center justify-center rounded-[22%] border border-dashed border-border bg-secondary/70 font-semibold uppercase text-muted-foreground", class }
 			aria-hidden="true"
 		>
@@ -737,7 +864,7 @@ templ projectSettingsActions(id string) {
 // which page you are on, so a reload and the back button keep it.
 templ VersionSelect(e view.Editor, path string) {
 	<label class="block space-y-1.5">
-		<span class="text-[11px] text-muted-foreground">Version</span>
+		<span class="text-[11px] text-sidebar-foreground/70">Version</span>
 		<select
 			class="cn-native-select w-full text-xs font-medium"
 			aria-label="Version"
@@ -850,6 +977,13 @@ templ SizeTabs(e view.Editor, path string) {
 // LocaleTabs switches the language the whole editor is looked at in. It is a
 // link rather than a control because the language is part of what page you are
 // on: a reload, a bookmark and the back button all have to keep it.
+//
+// Styled from `data-current` rather than from aria-current, which is the one
+// place in this application that has to be. howl's runtime re-applies
+// aria-current after every load by comparing *pathnames*, and these links
+// differ only by their query string — so it marks all of them current and the
+// selected language stops being visible at all. The attribute it does not
+// touch is the one that can carry the answer.
 templ LocaleTabs(e view.Editor, path string) {
 	<div class="flex flex-wrap items-center gap-1">
 		for _, tag := range e.Project.Locales {
@@ -857,8 +991,9 @@ templ LocaleTabs(e view.Editor, path string) {
 			{{ missing := len(e.Project.MissingCopy(tag)) }}
 			<a
 				href={ templ.SafeURL(path + "?locale=" + tag) }
-				class="inline-flex items-center gap-1.5 rounded-md border border-transparent px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 aria-[current=true]:border-border aria-[current=true]:bg-secondary aria-[current=true]:text-foreground"
+				class="inline-flex items-center gap-1.5 rounded-md border border-transparent px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 data-[current]:border-border data-[current]:bg-secondary data-[current]:text-foreground"
 				if tag == e.Locale {
+					data-current
 					aria-current="true"
 				}
 			>
@@ -883,7 +1018,7 @@ templ LocaleTabs(e view.Editor, path string) {
 templ LocaleSelect(e view.Editor, path string) {
 	if len(e.Project.Locales) > 1 {
 		<label class="block space-y-1.5">
-			<span class="text-[11px] text-muted-foreground">Language</span>
+			<span class="text-[11px] text-sidebar-foreground/70">Language</span>
 			<select
 				class="cn-native-select w-full text-xs"
 				aria-label="Language"

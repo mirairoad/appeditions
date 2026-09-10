@@ -31,6 +31,16 @@ type Shell struct {
 	// DataDir is shown in the footer and opened by the "reveal" action, so the
 	// files this writes are never mysterious.
 	DataDir string
+	// Update is set only when this build is behind the repository it came
+	// from. Zero means either up to date or not known, and the interface draws
+	// nothing for both — "there might be an update" is not worth a button.
+	Update Update
+}
+
+type Update struct {
+	Behind bool
+	// Latest is the short sha of what main is now, for the button to name.
+	Latest string
 }
 
 type Provider struct {

@@ -7,11 +7,17 @@ import (
 	"github.com/mirairoad/appeditions/server/apis/apistore"
 )
 
-// Pick is which uploaded original this screen draws. Empty clears the slot,
-// which is how a tile goes back to being a laid-out placeholder without being
-// deleted from the set.
+// Pick is which uploaded original this screen draws, in one language. Empty
+// clears the slot, which is how a tile goes back to being a laid-out
+// placeholder without being deleted from the set — or, under a translation,
+// how it goes back to drawing the base language's picture.
+//
+// Locale is the language being looked at; "" means the base one. A screenshot
+// is of the app, so a Japanese listing wants Japanese captures, and the picker
+// posts whichever language the editor is showing.
 type Pick struct {
 	AssetID string `json:"asset_id"`
+	Locale  string `json:"locale"`
 }
 
 // SetPicture points a screen at an original the project already holds.
@@ -35,13 +41,11 @@ var SetPicture = api.Define(api.Spec[api.None, Pick, apistore.Saved]{
 		}
 
 		p, err := apistore.Get().Edit(r.Context(), r.Param("id"), func(p *model.Project) {
-			// The composition, not the half: replacing the right tile of a
-			// panorama replaces the picture both halves are cut from, and
-			// writing it onto the half alone would be undone by the sync that
-			// follows every edit.
-			if screen, ok := p.Lead(r.Param("screen_id")); ok {
-				screen.AssetID = r.Body.AssetID
+			locale := r.Body.Locale
+			if !p.HasLocale(locale) {
+				locale = p.BaseLocale
 			}
+			p.SetPicture(r.Param("screen_id"), locale, r.Body.AssetID)
 		})
 		if err != nil {
 			return apistore.Saved{}, apistore.Fail(err)

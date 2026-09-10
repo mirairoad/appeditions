@@ -118,7 +118,9 @@ func Briefs(ctx context.Context, p model.Project, locale string, filledOnly bool
 			continue
 		}
 		c := s.Copy[locale]
-		file := names[s.AssetID]
+		// This language's capture, so a translation pass is briefed on the
+		// picture that language actually ships.
+		file := names[s.Asset(locale)]
 		if file == "" {
 			file = "screen " + strconv.Itoa(i+1) + " (no screenshot yet)"
 		}

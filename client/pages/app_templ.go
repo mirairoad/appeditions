@@ -107,14 +107,14 @@ func App(title, head string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<!--/page-head--></head><body class=\"min-h-screen bg-background font-sans text-foreground antialiased\"><main id=\"outlet\" data-route=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<!--/page-head--></head><!-- No hover prefetching, and no fragment swaps for links.\n\t\t\n\t\t     Both exist to hide a network round trip, and there is no network\n\t\t     here: the server is in this process. What a swap costs instead is\n\t\t     that #outlet is replaced — the top bar and the sidebar are torn\n\t\t     down and rebuilt on every step change — and that a fragment\n\t\t     rendered before the click that uses it describes a state which has\n\t\t     since moved on.\n\t\t\n\t\t     data-no-prefetch stops the hover fetch; the framework reads it off\n\t\t     the nearest ancestor, so once here it covers every link. Its\n\t\t     sibling `data-no-spa` is read off the anchor itself, so it cannot\n\t\t     be set once — turning links into document loads is a listener in\n\t\t     forge.js instead. --><body class=\"min-h-screen bg-background font-sans text-foreground antialiased\" data-no-prefetch><!-- The chrome's colour, and nothing else: a top band the height of\n\t\t\t     the bar, and a left column the width of the workspace sidebar.\n\t\t\t\n\t\t\t     It is here, outside #outlet, because a navigation replaces the\n\t\t\t     outlet's contents wholesale — the bar and the sidebar are torn\n\t\t\t     down and rebuilt as new nodes on every step change, and the\n\t\t\t     frame between the two is where the flash was. This does not\n\t\t\t     move, so the dark shapes are continuous and the rebuild\n\t\t\t     happens on top of its own colour.\n\t\t\t\n\t\t\t     It draws nothing on its own: the rules key off whether the\n\t\t\t     page actually has a sidebar, so the index and the templates\n\t\t\t     page get the band and no column. --><div data-chrome-backdrop aria-hidden=\"true\"></div><main id=\"outlet\" data-route=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(router.Current(ctx))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/app.templ`, Line: 31, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/app.templ`, Line: 59, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -164,7 +164,7 @@ func NotFound(path string) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(path)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/app.templ`, Line: 42, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/app.templ`, Line: 70, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -202,14 +202,14 @@ func footerNote() templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		shell := view.ShellOf(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<p class=\"text-xs text-muted-foreground\">Files live in <code class=\"font-mono\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<p class=\"text-xs text-chrome-foreground/60\">Files live in <code class=\"font-mono\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(shell.DataDir)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/app.templ`, Line: 53, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/app.templ`, Line: 81, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {

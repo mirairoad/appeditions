@@ -337,6 +337,134 @@ func TestSaveTemplateCapturesTheVariants(t *testing.T) {
 	}
 }
 
+// A look is not separable from the pictures it was judged on. A template that
+// kept the words and threw the captures away came back, months later, as a
+// layout of empty boxes.
+func TestSaveTemplateKeepsTheScreenshots(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	p, err := s.CreateProject(ctx, model.Project{Name: "Shot look", BaseLocale: "en-US", Locales: []string{"en-US"}}, builtin(t, s, "classic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var assets []Asset
+	for i := range len(p.Leads()) {
+		a, err := s.PutAsset(ctx, p, fmt.Sprintf("%02d-screen.png", i+1), fakePNG(t, 70+i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assets = append(assets, a)
+	}
+	if p, err = s.AddShots(ctx, p.ID, assets); err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := s.SaveTemplate(ctx, p.ID, "With pictures", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, sample := range saved.Samples {
+		if sample.Shot == "" {
+			t.Fatalf("slot %d saved no screenshot", i)
+		}
+		if _, err := os.Stat(filepath.Join(s.TemplateDir(saved.ID), sample.Shot)); err != nil {
+			t.Fatalf("slot %d names %q, which is not on disk: %v", i, sample.Shot, err)
+		}
+	}
+	// The language the words were written in, recorded rather than assumed.
+	if saved.Locale != "en-US" {
+		t.Errorf("template says its samples are in %q, want en-US", saved.Locale)
+	}
+
+	// A fresh project made from it comes up with pictures in every slot, and
+	// they are its own assets — replaceable, deletable, listed in Media.
+	other, err := s.CreateProject(ctx, model.Project{Name: "From template", BaseLocale: "en-US", Locales: []string{"en-US"}}, saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, screen := range other.Screens() {
+		if !screen.Filled() {
+			t.Fatalf("screen %d came up empty", i)
+		}
+	}
+	own, err := s.AssetsOf(ctx, other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(own) != len(saved.Samples) {
+		t.Errorf("the new project holds %d originals, want %d", len(own), len(saved.Samples))
+	}
+	// Deleting the project the template was saved from must not take the
+	// template's pictures with it: that project is the one most likely to go,
+	// because the template is what replaced it.
+	if err := s.DeleteProject(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.CreateProject(ctx, model.Project{Name: "After", BaseLocale: "en-US", Locales: []string{"en-US"}}, saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.Screens()[0].Filled() {
+		t.Error("the template lost its screenshots when the project that made it was deleted")
+	}
+}
+
+// Applying a template to a set that already has screenshots must not import
+// the template's own: the slots they would fill are the ones the project's own
+// pictures keep, so they would land in Media used by nothing.
+func TestApplyTemplateKeepsTheProjectsOwnShots(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	source, err := s.CreateProject(ctx, model.Project{Name: "Source", BaseLocale: "en-US", Locales: []string{"en-US"}}, builtin(t, s, "classic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assets []Asset
+	for i := range len(source.Leads()) {
+		a, err := s.PutAsset(ctx, source, fmt.Sprintf("%02d-source.png", i+1), fakePNG(t, 90+i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assets = append(assets, a)
+	}
+	if source, err = s.AddShots(ctx, source.ID, assets); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SaveTemplate(ctx, source.ID, "Source look", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target, err := s.CreateProject(ctx, model.Project{Name: "Target", BaseLocale: "en-US", Locales: []string{"en-US"}}, builtin(t, s, "classic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := s.PutAsset(ctx, target, "mine.png", fakePNG(t, 7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target, err = s.AddShots(ctx, target.ID, []Asset{mine}); err != nil {
+		t.Fatal(err)
+	}
+	if target, err = s.ApplyTemplate(ctx, target.ID, saved.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := target.Leads()[0].AssetID; got != mine.Doc.ID {
+		t.Errorf("the first slot draws %q, want the project's own capture %q", got, mine.Doc.ID)
+	}
+	own, err := s.AssetsOf(ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Its own, plus one per slot the template filled.
+	want := 1 + len(saved.Samples) - 1
+	if len(own) != want {
+		t.Errorf("the project holds %d originals, want %d", len(own), want)
+	}
+}
+
 func TestApplyRhythmLeavesColoursAlone(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
