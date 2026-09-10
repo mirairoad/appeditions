@@ -25,19 +25,19 @@ KEEP_SRC="${KEEP_SRC:-0}"
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
-# Go 1.25 is the module's own minimum: an older toolchain refuses the build
+# Go 1.27 is the module's own minimum: an older toolchain refuses the build
 # rather than producing something subtly wrong, so check it here where the
 # message can say what to do about it.
 check_go() {
-	command -v go >/dev/null 2>&1 || die "Go 1.25 or newer is required: https://go.dev/dl/"
+	command -v go >/dev/null 2>&1 || die "Go 1.27 or newer is required: https://go.dev/dl/"
 	v=$(go env GOVERSION 2>/dev/null || echo "")
 	v=${v#go}
 	major=${v%%.*}
 	rest=${v#*.}
 	minor=$(printf '%s' "${rest%%.*}" | tr -cd '0-9')
 	[ -n "$major" ] && [ -n "$minor" ] || return 0 # unparseable: let the build decide
-	if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 25 ]; }; then
-		die "Go 1.25 or newer is required, found $(go env GOVERSION)"
+	if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 27 ]; }; then
+		die "Go 1.27 or newer is required, found $(go env GOVERSION)"
 	fi
 }
 

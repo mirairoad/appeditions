@@ -64,7 +64,7 @@ what is still missing before the set can be uploaded.
 
 ## Run it
 
-You need Go 1.25. Nothing else — the stylesheet is committed, and rebuilding
+You need Go 1.27. Nothing else — the stylesheet is committed, and rebuilding
 it uses Tailwind's standalone binary rather than a Node toolchain.
 
 ```bash
