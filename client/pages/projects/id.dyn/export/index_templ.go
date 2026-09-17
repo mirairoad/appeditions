@@ -301,7 +301,7 @@ func Export() templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" checked class=\"peer sr-only\"> <span class=\"inline-block rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" checked data-list class=\"peer sr-only\"> <span class=\"inline-block rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
