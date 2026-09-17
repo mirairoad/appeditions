@@ -81,7 +81,7 @@ templ Export() {
 					<div class="flex flex-wrap gap-1.5">
 						for _, tag := range e.Project.Locales {
 							<label class="cursor-pointer">
-								<input type="checkbox" name="locales" value={ tag } checked class="peer sr-only"/>
+								<input type="checkbox" name="locales" value={ tag } checked data-list class="peer sr-only"/>
 								<span class="inline-block rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground">
 									{ tag }
 								</span>

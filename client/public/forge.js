@@ -83,7 +83,7 @@ document.addEventListener(
  * and puts it back afterwards. Returns the undo. */
 function saySlow(el) {
   const note = el?.dataset?.slow;
-  if (!note) return () => {};
+  if (!note) return () => { };
   const original = el.innerHTML;
   el.innerHTML =
     '<span class="spin" aria-hidden="true"></span>' +
@@ -237,30 +237,25 @@ function serialize(form) {
       .filter(
         (el) =>
           el.name &&
-          // A repeated checkbox group is a list by shape. A repeated <select>
-          // is not — one per store slot, all named "frames" — and nothing in
-          // the markup distinguishes it from a single control, so it says so
-          // with data-list.
-          ((el.type === "checkbox" && counts[el.name] > 1) ||
+          ((el.type === "checkbox" && counts[el.name] >= 1 && el.dataset.list !== undefined) ||
+            (el.type === "checkbox" && counts[el.name] > 1) ||
             el.dataset.list !== undefined),
       )
       .map((el) => el.name),
   );
 
   const body = {};
-  // An empty group sends no entries at all, and a missing key reads as "not
-  // specified" rather than "none of them" — so the lists are seeded first.
   for (const name of lists) body[name] = [];
-  // A lone checkbox sends nothing when it is unticked, which an endpoint
-  // declaring a bool decodes as false — right by accident, and wrong the
-  // moment the field's default is true. `data-bool` sends the answer either
-  // way, as a real boolean rather than the string "on".
+
+  const bools = new Set();
   for (const el of form.elements) {
     if (el.name && el.type === "checkbox" && el.dataset.bool !== undefined) {
       body[el.name] = el.checked;
+      bools.add(el.name);
     }
   }
   for (const [key, value] of new FormData(form).entries()) {
+    if (bools.has(key)) continue; // already set as a real boolean above
     if (lists.has(key)) body[key].push(value);
     else body[key] = value;
   }
