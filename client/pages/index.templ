@@ -212,7 +212,7 @@ templ newProjectModal(v view.Projects) {
 			<fieldset class="space-y-2">
 				<legend class="text-sm font-medium">Devices</legend>
 				<p class="text-xs text-muted-foreground">
-					Tick every device family you ship to — iPhone, iPad and Android at once if you like. The same screens and the same copy are drawn at each, and each gets its own export folder. Only the largest device per family is required; both stores downscale for the rest.
+					Tick every device family you ship to — iPhone, iPad and Android at once if you like. The same screens and the same copy are drawn at each, and each gets its own export folder. One size per family is enough; both stores scale it for the rest.
 				</p>
 				<div class="flex flex-wrap gap-1.5 pt-1">
 					for _, size := range v.Sizes {
@@ -221,7 +221,7 @@ templ newProjectModal(v view.Projects) {
 								type="checkbox"
 								name="sizes"
 								value={ size.ID }
-								checked?={ size.ID == "iphone-6-9" }
+								checked?={ size.ID == "iphone-island-medium" }
 								class="peer sr-only"
 							/>
 							<span class="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors peer-checked:border-primary peer-checked:bg-primary/15 peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">

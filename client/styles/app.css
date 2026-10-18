@@ -219,6 +219,21 @@
   pointer-events: none;
 }
 
+/* The document holds still under the frame. The frame is exactly the window
+ * (h-dvh, layout.templ) and its pane is the only thing in it that scrolls —
+ * but that holds only while nothing anywhere overflows, and the first sr-only
+ * checkbox outside the pane's containing block, or a body taller than the
+ * frame, makes the document scrollable again: a wheel over the sidebar or the
+ * bar then moves the whole frame.
+ *
+ * overflow on <html> is the viewport's, so nothing can scroll the window, and
+ * overscroll-behavior-y stops the rubber band that drags a locked root down
+ * anyway in WebKit. Vertical only: across is the swipe that goes back a page. */
+html:has([data-frame]) {
+  overflow: hidden;
+  overscroll-behavior-y: none;
+}
+
 /* Mirrors sidebar.Provider's own two constants. Written out rather than read
  * through var(): the provider sets them inside the outlet, which this element
  * is deliberately not in, so they do not reach here. */
@@ -386,8 +401,13 @@ body:has([data-collapsible="icon"]) [data-chrome-backdrop]::after {
 
 /* The page behind an open modal must not scroll, or a trackpad flick moves the
  * list instead of the form. :has is what makes this possible without a class
- * toggled from script. */
-body:has([data-modal]:checked) {
+ * toggled from script.
+ *
+ * The pane, not the body: the body no longer scrolls (see the frame, above).
+ * Every modal is a descendant of the pane, so a wheel over its backdrop
+ * chains up to the pane and would move the page behind. `hidden` keeps the
+ * pane's scrollTop, so closing the modal leaves the page where it was. */
+body:has([data-modal]:checked) [data-pane] {
   overflow: hidden;
 }
 

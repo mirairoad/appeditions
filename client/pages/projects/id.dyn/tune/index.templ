@@ -98,10 +98,21 @@ templ Tune() {
 		     white — so the surface behind them stays white and the controls sit
 		     on their own panel. It is sticky because the strip below it is
 		     taller than the window and a control you have to scroll back up to
-		     is a control you stop using. -->
+		     is a control you stop using.
+
+		     top-6 is measured from the frame's pane, which is what scrolls, not
+		     from the window: 1.5rem under the bar, where top-20 put it when the
+		     document scrolled under a 3.5rem sticky bar. The max height is the
+		     same arithmetic as before — the window, less the bar, the 1.5rem
+		     above and 1rem below.
+
+		     data-keep-scroll, because this panel scrolls on its own at xl and
+		     every slider nudge re-renders it: without it a control halfway down
+		     put the panel back at Background after each change. -->
 		<div
 			data-patch-scope={ scopeEndpoint(e) }
-			class="h-fit space-y-6 rounded-xl border border-border/60 bg-secondary/40 p-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:overscroll-contain"
+			data-keep-scroll="tune-panel"
+			class="h-fit space-y-6 rounded-xl border border-border/60 bg-secondary/40 p-5 xl:sticky xl:top-6 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto xl:overscroll-contain"
 		>
 			@section(e, "background", "Background", scoped, screen) {
 				<!-- No swatch palette. A row of pre-chosen colours is a row of

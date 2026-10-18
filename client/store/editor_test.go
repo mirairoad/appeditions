@@ -19,7 +19,7 @@ func project() model.Project {
 		BaseLocale: "en-US",
 		Locales:    []string{"en-US", "ja"},
 		Settings:   model.DefaultSettings(),
-		Versions:   []model.Version{{ID: "v_1", Name: "1.0", Targets: []model.Target{presets.Target("iphone-6-9")}}},
+		Versions:   []model.Version{{ID: "v_1", Name: "1.0", Targets: []model.Target{presets.Target("iphone-island-medium")}}},
 		VersionID:  "v_1",
 	}
 	for _, id := range []string{"a", "b", "c"} {

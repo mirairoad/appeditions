@@ -617,3 +617,55 @@ func TestVersionsRoundTripWithTheirOwnSlots(t *testing.T) {
 		t.Errorf("selected version is %q, want %q", fresh.VersionID, p.VersionID)
 	}
 }
+
+// An export folder written under a retired slot id is renamed to its
+// replacement on the next start, so the app lists it and export.zip does not
+// carry a second, stale copy of the set under the old name. A destination that
+// already exists is never overwritten.
+func TestOpenRenamesRetiredExportFolders(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	first, err := Open(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := first.CreateProject(ctx, model.Project{Name: "Old slots", BaseLocale: "en-US", Locales: []string{"en-US"}}, builtin(t, first, "classic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(sizeID, file string) {
+		dir := first.ExportDir(p, "en-US", sizeID)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(sizeID), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("iphone-6-9", "01-old.png")
+	write("iphone-6-5", "01-old.png")
+	write("iphone-faceid-large", "01-new.png") // already exported under the new name
+	first.Close()
+
+	second, err := Open(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	moved := filepath.Join(second.ExportDir(p, "en-US", "iphone-island-large"), "01-old.png")
+	if b, err := os.ReadFile(moved); err != nil || string(b) != "iphone-6-9" {
+		t.Errorf("iphone-6-9 export not moved to iphone-island-large: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(second.ExportsDir(p), "iphone-6-9")); !os.IsNotExist(err) {
+		t.Errorf("iphone-6-9 export still there: %v", err)
+	}
+	// The existing destination wins and the source is left beside it.
+	if _, err := os.Stat(filepath.Join(second.ExportDir(p, "en-US", "iphone-faceid-large"), "01-new.png")); err != nil {
+		t.Errorf("existing iphone-faceid-large export disturbed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(second.ExportDir(p, "en-US", "iphone-6-5"), "01-old.png")); err != nil {
+		t.Errorf("iphone-6-5 export dropped though its destination existed: %v", err)
+	}
+}

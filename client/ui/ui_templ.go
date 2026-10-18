@@ -422,9 +422,9 @@ func stepStatus(e view.Editor, slug string) StepStatus {
 //
 // width AND height, both. Without the second the browser reserves no space for
 // a tile it has not painted. #outlet is replaced wholesale on every re-render,
-// so for one frame the page is as short as its text, and howl restores the
-// scroll with window.scrollTo — which the browser clamps to the bottom of that
-// short document. Every change jumped the page to the top.
+// so for one frame the page is as short as its text, and forge.js restores the
+// pane's scrollTop right then — which the browser clamps to the bottom of that
+// short page. Every change jumped the page to the top.
 //
 // `v` names the drawing, so an unchanged tile is a byte-identical URL the cache
 // answers without a request. Without it every tile blanked for one revalidation

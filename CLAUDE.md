@@ -299,6 +299,15 @@ passes `fresh: true`, so its fragment is never the cached one, and reloading
 the document on every nudge of a slider would throw away the scroll position
 and the control's focus. That swap is why `[data-chrome-backdrop]` exists.
 
+**The window never scrolls.** `layout.templ`'s frame is exactly the window's
+height, the bar and the sidebar hold still, and the pane under the bar
+(`[data-pane]`) is the one thing that scrolls. `app.css` locks `<html>` while
+the frame is on screen. So `window.scrollY` is always 0, and howl's own scroll
+restore after a swap does nothing. `refresh()` keeps the position of every
+element marked `data-keep-scroll` instead. Mark anything else that scrolls on
+its own and is re-rendered by a write, the way the tune panel is, or a slider
+nudge puts it back at the top.
+
 **Preview tiles render at 2× their layout width.** The `width` attribute is the
 CSS size and the pixels behind it are double, because every display this runs
 on is Retina and a tile rendered at its CSS width is upscaled by the browser.

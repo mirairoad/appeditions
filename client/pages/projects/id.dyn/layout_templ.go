@@ -28,10 +28,10 @@ import (
 // this adds is where it sits and what is in it.
 //
 // It is fixed below the top bar and runs to the bottom of the window, so it
-// behaves the way the top bar does — the page scrolls underneath it and the
-// sidebar does not move. `top-14`/`h-[calc(100svh-3.5rem)]` are marked
-// important because the component pins itself to `inset-y-0 h-svh`, which
-// would put it *over* the 3.5rem bar rather than under it.
+// holds still the way the top bar does while the frame's pane scrolls beside
+// it. `top-14`/`h-[calc(100svh-3.5rem)]` are marked important because the
+// component pins itself to `inset-y-0 h-svh`, which would put it *over* the
+// 3.5rem bar rather than under it.
 //
 // The rail is navigation and never a gate. The steps are in the order the
 // decisions depend on — the look shapes the slots, the slots take the
@@ -129,7 +129,7 @@ func Layout() templ.Component {
 					var templ_7745c5c3_Var5 string
 					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(e.Project.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 64, Col: 80}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 67, Col: 80}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 					if templ_7745c5c3_Err != nil {
@@ -142,7 +142,7 @@ func Layout() templ.Component {
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(sizeLabel(e))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 65, Col: 75}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 68, Col: 75}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -155,7 +155,7 @@ func Layout() templ.Component {
 					var templ_7745c5c3_Var7 string
 					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(ui.ProjectSettingsID(e.Project.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 71, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 74, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 					if templ_7745c5c3_Err != nil {
@@ -421,7 +421,10 @@ func Layout() templ.Component {
 			// every step change — a collapsed state living only in the DOM would
 			// spring back open each time.
 			DisableDefaultOpen: view.RequestOf(ctx).SidebarCollapsed,
-			Class:              "min-h-[calc(100svh-3.5rem)]!",
+			// The pane's height and not the component's min-h-svh, which is the
+			// whole window: 3.5rem taller than the pane it sits in, so every step
+			// would scroll by the height of the bar with nothing below it.
+			Class: "min-h-full!",
 		}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -624,7 +627,7 @@ func statusLine(e view.Editor) templ.Component {
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(exportLabel(r.CanExport))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 202, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 205, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
@@ -687,7 +690,7 @@ func statusRow(label, warn, done string, ok bool) templ.Component {
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 213, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 216, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 		if templ_7745c5c3_Err != nil {
@@ -705,7 +708,7 @@ func statusRow(label, warn, done string, ok bool) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(done)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 215, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 218, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
@@ -723,7 +726,7 @@ func statusRow(label, warn, done string, ok bool) templ.Component {
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(warn)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 217, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/layout.templ`, Line: 220, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {

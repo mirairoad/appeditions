@@ -85,7 +85,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Background:       Solid("#eaf2ff"),
 		BackdropColor:    "",
-		DeviceID:         "iphone-17-pro",
+		DeviceID:         "iphone-17",
 		FrameColorID:     "deep-blue",
 		PositionID:       "center",
 		Layout:           "text-top",
@@ -296,19 +296,21 @@ func (p *Project) Migrate() {
 	}
 	p.LegacyTargets = nil
 
-	// The inch-named iPhone slots went when App Store Connect renamed its
-	// categories. A stored id the table no longer has would not fail — the
-	// size lookup falls back to the first slot — but the target list would
-	// keep the dead id, so the export would write under the old directory
-	// name and the Release step would show a slot nobody can untick.
-	if to, ok := renamedSizes[p.Settings.SizeID]; ok {
+	// The inch-named iPhone slots went when the table moved to App Store
+	// Connect's own categories. A stored id the table no longer has would not
+	// fail — the size lookup falls back to the first slot — but the target
+	// list would keep the dead id, so the export would write under the old
+	// directory name and the Release step would show a slot nobody can untick.
+	// A version that already held the replacement collapses to one target per
+	// slot rather than exporting the same set twice.
+	if to, ok := RetiredSizes[p.Settings.SizeID]; ok {
 		p.Settings.SizeID = to
 	}
 	for i := range p.Versions {
 		v := &p.Versions[i]
 		kept := v.Targets[:0]
 		for _, t := range v.Targets {
-			if to, ok := renamedSizes[t.SizeID]; ok {
+			if to, ok := RetiredSizes[t.SizeID]; ok {
 				t.SizeID = to
 			}
 			if !hasSize(kept, t.SizeID) {
@@ -322,12 +324,17 @@ func (p *Project) Migrate() {
 	p.Targets() // and a version with no slot to draw in
 }
 
-// renamedSizes maps retired store-slot ids to the slot that replaced them.
-// The 6.9" set was drawn at 1320×2868 and the 6.5" at 1242×2688; both move
-// to a medium slot, which is what App Store Connect now requires.
-var renamedSizes = map[string]string{
-	"iphone-6-9": "iphone-island-medium",
-	"iphone-6-5": "iphone-faceid-medium",
+// RetiredSizes maps retired store-slot ids to the App Store Connect category
+// each one always was, at the same pixel size: the 6.9" slot drew 1320×2868,
+// which is Dynamic Island (large), and the 6.5" slot drew 1242×2688, which is
+// what Face ID (large) draws. A set already uploaded therefore stays
+// consistent when one language of it is exported again.
+//
+// Exported because the documents are not the only thing named after a slot:
+// the store renames the export folders written under these ids too.
+var RetiredSizes = map[string]string{
+	"iphone-6-9": "iphone-island-large",
+	"iphone-6-5": "iphone-faceid-large",
 }
 
 func hasSize(ts []Target, sizeID string) bool {
