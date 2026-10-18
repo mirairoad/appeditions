@@ -303,14 +303,14 @@ func (p *Project) Migrate() {
 	// directory name and the Release step would show a slot nobody can untick.
 	// A version that already held the replacement collapses to one target per
 	// slot rather than exporting the same set twice.
-	if to, ok := renamedSizes[p.Settings.SizeID]; ok {
+	if to, ok := RetiredSizes[p.Settings.SizeID]; ok {
 		p.Settings.SizeID = to
 	}
 	for i := range p.Versions {
 		v := &p.Versions[i]
 		kept := v.Targets[:0]
 		for _, t := range v.Targets {
-			if to, ok := renamedSizes[t.SizeID]; ok {
+			if to, ok := RetiredSizes[t.SizeID]; ok {
 				t.SizeID = to
 			}
 			if !hasSize(kept, t.SizeID) {
@@ -324,12 +324,15 @@ func (p *Project) Migrate() {
 	p.Targets() // and a version with no slot to draw in
 }
 
-// renamedSizes maps retired store-slot ids to the category each one always
-// was. The 6.9" slot drew 1320×2868, which is Dynamic Island (large) to the
-// pixel, so a set designed there keeps its size. The 6.5" slot drew 1242×2688,
-// one of the sizes Face ID (large) accepts; that slot draws the larger
-// 1284×2778, the same aspect to three places, so the composition only scales.
-var renamedSizes = map[string]string{
+// RetiredSizes maps retired store-slot ids to the App Store Connect category
+// each one always was, at the same pixel size: the 6.9" slot drew 1320×2868,
+// which is Dynamic Island (large), and the 6.5" slot drew 1242×2688, which is
+// what Face ID (large) draws. A set already uploaded therefore stays
+// consistent when one language of it is exported again.
+//
+// Exported because the documents are not the only thing named after a slot:
+// the store renames the export folders written under these ids too.
+var RetiredSizes = map[string]string{
 	"iphone-6-9": "iphone-island-large",
 	"iphone-6-5": "iphone-faceid-large",
 }

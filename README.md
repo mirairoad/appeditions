@@ -161,20 +161,28 @@ A second starred phrase takes the second highlight colour.
 ## Export sizes
 
 The App Store slots are App Store Connect's own display categories, one for
-one, each at the largest size it accepts. Its product page asks for iPhone
-Dynamic Island (medium), iPad 13" and Apple Watch; the rest are optional, and
-App Store Connect fills a category you leave empty by scaling one you upload.
+one, each at a size it accepts — the largest, except where an older slot's
+size is kept so a set you have already uploaded stays consistent. Its product
+page asks for iPhone Dynamic Island (medium), iPad 13" and Apple Watch; the
+rest are optional, and App Store Connect fills a category you leave empty by
+scaling one you upload. The two Watch slots are two ways of filling its one
+Watch category: it wants the same size in every language, so pick one.
+
+Projects made before this list keep working: `iPhone 6.9"` becomes Dynamic
+Island (large) and `iPhone 6.5"` becomes Face ID (large), both at the pixel
+size they always drew, and their export folders are renamed to match.
 
 | Store | Target | Pixels |
 | --- | --- | --- |
 | App Store | iPhone Dynamic Island (large) | 1320 × 2868 |
 | App Store | iPhone Dynamic Island (medium) | 1206 × 2622 |
-| App Store | iPhone Face ID (large) | 1284 × 2778 |
+| App Store | iPhone Face ID (large) | 1242 × 2688 |
 | App Store | iPhone Face ID (medium) | 1170 × 2532 |
 | App Store | iPhone Home Button (medium) | 750 × 1334 |
 | App Store | iPad 13" | 2064 × 2752 |
 | App Store | iPad 11" | 1668 × 2420 |
-| App Store | Apple Watch Ultra | 422 × 514 |
+| App Store | Apple Watch Ultra 3 | 422 × 514 |
+| App Store | Apple Watch Ultra 2 | 410 × 502 |
 | Google Play | Phone | 1080 × 1920 |
 | Google Play | Phone (tall) | 1080 × 2400 |
 | Google Play | Tablet | 1600 × 2560 |

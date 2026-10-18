@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -203,7 +204,54 @@ func Open(ctx context.Context, root string) (*Store, error) {
 	if err := s.seedTemplates(ctx); err != nil {
 		return nil, err
 	}
+	s.renameRetiredExports(ctx)
 	return s, nil
+}
+
+// renameRetiredExports moves an export folder written under a retired slot id
+// to the id that replaced it.
+//
+// The documents are migrated on every read, but the folders are named after
+// the slot as well, and nothing reads them back to migrate: the export writes
+// and lists the new name only. Left alone, exports/iphone-6-9 stayed beside
+// exports/iphone-island-large — invisible in the app, still in Finder, and
+// packed into export.zip with the current set, where it is one wrong folder
+// away from being uploaded. Renamed rather than deleted, because RetiredSizes
+// maps each id to the slot drawing the same pixels: the files in it are a
+// valid upload for the new slot, and the app lists them as already on disk.
+//
+// A destination that already exists is left alone with its source beside it.
+// Merging two exports of one slot language by language would have to decide
+// which is current, and the only answer this can give without looking at the
+// files is the wrong one half the time.
+//
+// A failure is logged and skipped rather than returned. Open failing is the
+// application not starting, and a folder that cannot be moved — a permission,
+// a file held open — is not a reason to keep anyone out of their projects.
+//
+// This runs on every start; after the first, it is one Stat per retired id per
+// project, all of them misses.
+func (s *Store) renameRetiredExports(ctx context.Context) {
+	projects, err := s.ListProjects(ctx)
+	if err != nil {
+		slog.Warn("export folders not checked for retired slots", "err", err)
+		return
+	}
+	for _, p := range projects {
+		root := s.ExportsDir(p)
+		for from, to := range model.RetiredSizes {
+			src, dst := filepath.Join(root, from), filepath.Join(root, to)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			if _, err := os.Stat(dst); err == nil {
+				continue
+			}
+			if err := os.Rename(src, dst); err != nil {
+				slog.Warn("export folder not renamed", "project", p.Slug, "from", from, "to", to, "err", err)
+			}
+		}
+	}
 }
 
 func (s *Store) Close() error { return s.conn.Close() }

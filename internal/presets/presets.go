@@ -33,7 +33,8 @@ var Devices = []model.Device{
 	// A watch is mostly bezel and mostly corner radius, which is why it needs
 	// its own row rather than a scaled phone: at 0.09 bezel and 0.30 radius the
 	// same drawing code produces a watch body.
-	{ID: "watch-ultra", Label: "Apple Watch Ultra", Group: "Watch", ScreenAspect: 422.0 / 514, Bezel: 0.090, Radius: 0.300, Notch: model.NotchNone},
+	{ID: "watch-ultra", Label: "Apple Watch Ultra 2", Group: "Watch", ScreenAspect: 410.0 / 502, Bezel: 0.090, Radius: 0.300, Notch: model.NotchNone},
+	{ID: "watch-ultra-3", Label: "Apple Watch Ultra 3", Group: "Watch", ScreenAspect: 422.0 / 514, Bezel: 0.090, Radius: 0.300, Notch: model.NotchNone},
 
 	{ID: "none", Label: "No frame", Group: "Other", ScreenAspect: 1320.0 / 2868, Bezel: 0, Radius: 0.045, Notch: model.NotchNone},
 }
@@ -150,9 +151,18 @@ var Positions = []model.Position{
 // left empty by scaling a set it does have.
 //
 // Each takes the largest size ASC accepts for its category: 1320×2868 over
-// 1290×2796 and 1260×2736; 1206×2622 over 1179×2556; 1284×2778 over
-// 1242×2688; 1170×2532 over 1125×2436 and 1080×2340; 2064×2752 over 2048×2732;
-// 1668×2420 over 1668×2388, 1640×2360 and 1488×2266; 422×514 over 410×502.
+// 1290×2796 and 1260×2736; 1206×2622 over 1179×2556; 1170×2532 over 1125×2436
+// and 1080×2340; 2064×2752 over 2048×2732; 1668×2420 over 1668×2388, 1640×2360
+// and 1488×2266.
+//
+// Except where a slot already existed, because a slot id is a promise of a
+// pixel size. Changing one under a stored project changes what exporting one
+// language again produces, and that file then disagrees with the rest of the
+// set already in App Store Connect. Face ID (large) draws the 6.5" slot's
+// 1242×2688 rather than 1284×2778 — both accepted, the same aspect to three
+// places — because that is what model.RetiredSizes maps it from. The Watch
+// keeps its 410×502 slot, and ASC refuses a Watch set whose size differs from
+// one language to the next, so the Ultra 3 and 4 panel is a slot of its own.
 //
 // Left out on purpose: the Home Button large, 4" and 3.5" iPhones and the
 // 12.9", 10.5" and 9.7" iPads, whose devices current iOS no longer runs on,
@@ -164,7 +174,7 @@ var Positions = []model.Position{
 var Sizes = []model.ExportSize{
 	{ID: "iphone-island-large", Label: "iPhone Dynamic Island (large)", Store: "App Store", W: 1320, H: 2868, Device: "iphone-17-pro"},
 	{ID: "iphone-island-medium", Label: "iPhone Dynamic Island (medium)", Store: "App Store", W: 1206, H: 2622, Device: "iphone-17"},
-	{ID: "iphone-faceid-large", Label: "iPhone Face ID (large)", Store: "App Store", W: 1284, H: 2778, Device: "iphone-17"},
+	{ID: "iphone-faceid-large", Label: "iPhone Face ID (large)", Store: "App Store", W: 1242, H: 2688, Device: "iphone-17"},
 	{ID: "iphone-faceid-medium", Label: "iPhone Face ID (medium)", Store: "App Store", W: 1170, H: 2532, Device: "iphone-17"},
 	{ID: "iphone-home-medium", Label: "iPhone Home Button (medium)", Store: "App Store", W: 750, H: 1334, Device: "iphone-se"},
 	{ID: "ipad-13", Label: `iPad 13"`, Store: "App Store", W: 2064, H: 2752, Device: "ipad-13"},
@@ -173,8 +183,9 @@ var Sizes = []model.ExportSize{
 	{ID: "android-phone-tall", Label: "Android phone (tall)", Store: "Google Play", W: 1080, H: 2400, Device: "pixel-9-pro"},
 	{ID: "android-tablet", Label: "Android tablet", Store: "Google Play", W: 1600, H: 2560, Device: "android-tablet"},
 	// ASC's one Watch category takes a size per model and the same size in
-	// every language; 422×514 is the Ultra 3 and 4 panel, the largest it lists.
-	{ID: "watch-ultra", Label: "Apple Watch Ultra", Store: "App Store", W: 422, H: 514, Device: "watch-ultra"},
+	// every language, so these are two ways of filling it, not two uploads.
+	{ID: "watch-ultra-3", Label: "Apple Watch Ultra 3", Store: "App Store", W: 422, H: 514, Device: "watch-ultra-3"},
+	{ID: "watch-ultra", Label: "Apple Watch Ultra 2", Store: "App Store", W: 410, H: 502, Device: "watch-ultra"},
 }
 
 // Target is the store slot for an export size, with the frame that belongs in
