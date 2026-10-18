@@ -20,10 +20,10 @@ import (
 // this adds is where it sits and what is in it.
 //
 // It is fixed below the top bar and runs to the bottom of the window, so it
-// behaves the way the top bar does — the page scrolls underneath it and the
-// sidebar does not move. `top-14`/`h-[calc(100svh-3.5rem)]` are marked
-// important because the component pins itself to `inset-y-0 h-svh`, which
-// would put it *over* the 3.5rem bar rather than under it.
+// holds still the way the top bar does while the frame's pane scrolls beside
+// it. `top-14`/`h-[calc(100svh-3.5rem)]` are marked important because the
+// component pins itself to `inset-y-0 h-svh`, which would put it *over* the
+// 3.5rem bar rather than under it.
 //
 // The rail is navigation and never a gate. The steps are in the order the
 // decisions depend on — the look shapes the slots, the slots take the
@@ -41,7 +41,10 @@ templ Layout() {
 		// every step change — a collapsed state living only in the DOM would
 		// spring back open each time.
 		DisableDefaultOpen: view.RequestOf(ctx).SidebarCollapsed,
-		Class:              "min-h-[calc(100svh-3.5rem)]!",
+		// The pane's height and not the component's min-h-svh, which is the
+		// whole window: 3.5rem taller than the pane it sits in, so every step
+		// would scroll by the height of the bar with nothing below it.
+		Class: "min-h-full!",
 	}) {
 		@sidebar.Sidebar(sidebar.Props{
 			Collapsible: sidebar.CollapsibleIcon,

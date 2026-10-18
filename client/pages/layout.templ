@@ -18,9 +18,17 @@ import (
 // chrome reads as a frame around a white page. Opaque rather than translucent
 // and blurred: the sidebar underneath it is a solid colour, and a bar that
 // tinted where they overlap would show the join it exists to hide.
+//
+// The frame is exactly the window and the document never scrolls: the bar is a
+// row of it, and the pane under the bar is the one thing that does. A sticky
+// bar over a scrolling document looked the same until it moved — the
+// scrollbar ran the full height of the window beside the bar, and a trackpad
+// overscroll rubber-banded the bar and the sidebar along with the page.
+// app.css locks <html> while this frame is on screen, so nothing that
+// overflows by accident can bring that back.
 templ Layout() {
-	<div class="flex min-h-screen flex-col">
-		<header class="sticky top-0 z-20 flex h-14 items-center gap-6 bg-chrome px-5 text-chrome-foreground">
+	<div data-frame class="flex h-dvh flex-col">
+		<header class="z-20 flex h-14 shrink-0 items-center gap-6 bg-chrome px-5 text-chrome-foreground">
 			<a href="/" class="flex items-center gap-2 text-sm font-semibold tracking-tight">
 				@ui.Icon("look", "size-5 text-primary")
 				AppEditions
@@ -33,7 +41,19 @@ templ Layout() {
 				@footerNote()
 			</div>
 		</header>
-		<div class="flex-1">
+		<!-- min-h-0, or a flex child refuses to shrink below its content and a
+		     long page grows the frame instead of scrolling the pane.
+
+		     relative, because a scroller only carries the absolutely
+		     positioned boxes it is the containing block for. Without it every
+		     sr-only checkbox and label on a page — each panel and modal has one
+		     — belongs to the document instead, sits where it would have been
+		     in flow, and makes the document tall enough to scroll again.
+
+		     data-keep-scroll: refresh() in forge.js re-renders the page after
+		     every write, and howl restores the window's scroll, which is now
+		     always 0. forge.js keeps this pane's position itself. -->
+		<div data-pane data-keep-scroll="page" class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
 			{ children... }
 		</div>
 	</div>

@@ -22,16 +22,33 @@ const json = { "Content-Type": "application/json" };
  * rhythm left the strip showing the old layout until the entry aged out —
  * which read as "it only updates if I go to another step and come back".
  *
- * `scroll` is the current position, not `false`: howl reads it as a number and
- * anything else means the top of the page, so a change made halfway down the
+ * The scroll position is not howl's to keep. howl restores the *window's*
+ * scroll after a swap, and the window never scrolls here: the frame is the
+ * window's height and its pane is what moves (layout.templ). So every element
+ * marked `data-keep-scroll` is read before the swap and put back the moment
+ * the new markup lands — without it a change made halfway down the
  * screenshots list jumped back to the header. */
 async function refresh() {
   if (window.howl) {
-    await window.howl.navigate(location.href, {
-      replace: true,
-      fresh: true,
-      scroll: window.scrollY,
-    });
+    const url = location.href;
+    const kept = new Map();
+    for (const pane of document.querySelectorAll("[data-keep-scroll]")) {
+      kept.set(pane.dataset.keepScroll, pane.scrollTop);
+    }
+    // howl:navigate fires synchronously after the swap and before paint, so
+    // the restored offset is the first frame drawn. A refresh that fails
+    // leaves this listener behind, and the url check keeps it from applying
+    // one page's offsets to whatever is navigated to next.
+    const restore = (event) => {
+      if (event.detail?.url !== url) return;
+      document.removeEventListener("howl:navigate", restore);
+      for (const pane of document.querySelectorAll("[data-keep-scroll]")) {
+        const top = kept.get(pane.dataset.keepScroll);
+        if (top !== undefined) pane.scrollTop = top;
+      }
+    };
+    document.addEventListener("howl:navigate", restore);
+    await window.howl.navigate(url, { replace: true, fresh: true });
   } else {
     location.reload();
   }

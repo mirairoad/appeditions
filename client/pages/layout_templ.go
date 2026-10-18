@@ -26,6 +26,14 @@ import (
 // chrome reads as a frame around a white page. Opaque rather than translucent
 // and blurred: the sidebar underneath it is a solid colour, and a bar that
 // tinted where they overlap would show the join it exists to hide.
+//
+// The frame is exactly the window and the document never scrolls: the bar is a
+// row of it, and the pane under the bar is the one thing that does. A sticky
+// bar over a scrolling document looked the same until it moved — the
+// scrollbar ran the full height of the window beside the bar, and a trackpad
+// overscroll rubber-banded the bar and the sidebar along with the page.
+// app.css locks <html> while this frame is on screen, so nothing that
+// overflows by accident can bring that back.
 func Layout() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -47,7 +55,7 @@ func Layout() templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex min-h-screen flex-col\"><header class=\"sticky top-0 z-20 flex h-14 items-center gap-6 bg-chrome px-5 text-chrome-foreground\"><a href=\"/\" class=\"flex items-center gap-2 text-sm font-semibold tracking-tight\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div data-frame class=\"flex h-dvh flex-col\"><header class=\"z-20 flex h-14 shrink-0 items-center gap-6 bg-chrome px-5 text-chrome-foreground\"><a href=\"/\" class=\"flex items-center gap-2 text-sm font-semibold tracking-tight\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -75,7 +83,7 @@ func Layout() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div></header><div class=\"flex-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div></header><!-- min-h-0, or a flex child refuses to shrink below its content and a\n\t\t     long page grows the frame instead of scrolling the pane.\n\n\t\t     relative, because a scroller only carries the absolutely\n\t\t     positioned boxes it is the containing block for. Without it every\n\t\t     sr-only checkbox and label on a page — each panel and modal has one\n\t\t     — belongs to the document instead, sits where it would have been\n\t\t     in flow, and makes the document tall enough to scroll again.\n\n\t\t     data-keep-scroll: refresh() in forge.js re-renders the page after\n\t\t     every write, and howl restores the window's scroll, which is now\n\t\t     always 0. forge.js keeps this pane's position itself. --><div data-pane data-keep-scroll=\"page\" class=\"relative min-h-0 flex-1 overflow-y-auto overscroll-contain\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -126,7 +134,7 @@ func navLink(path string, label string, icon string) templ.Component {
 		var templ_7745c5c3_Var3 templ.SafeURL
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(path))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 51, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 71, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -153,7 +161,7 @@ func navLink(path string, label string, icon string) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 58, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/layout.templ`, Line: 78, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {

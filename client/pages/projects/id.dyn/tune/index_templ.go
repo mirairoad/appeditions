@@ -268,20 +268,20 @@ func Tune() templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div></div><!-- The panel carries the grey, not the page. The tiles are the thing\n\t\t     being judged and they are judged against white — a store page is\n\t\t     white — so the surface behind them stays white and the controls sit\n\t\t     on their own panel. It is sticky because the strip below it is\n\t\t     taller than the window and a control you have to scroll back up to\n\t\t     is a control you stop using. --><div data-patch-scope=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div></div><!-- The panel carries the grey, not the page. The tiles are the thing\n\t\t     being judged and they are judged against white — a store page is\n\t\t     white — so the surface behind them stays white and the controls sit\n\t\t     on their own panel. It is sticky because the strip below it is\n\t\t     taller than the window and a control you have to scroll back up to\n\t\t     is a control you stop using.\n\n\t\t     top-6 is measured from the frame's pane, which is what scrolls, not\n\t\t     from the window: 1.5rem under the bar, where top-20 put it when the\n\t\t     document scrolled under a 3.5rem sticky bar. The max height is the\n\t\t     same arithmetic as before — the window, less the bar, the 1.5rem\n\t\t     above and 1rem below.\n\n\t\t     data-keep-scroll, because this panel scrolls on its own at xl and\n\t\t     every slider nudge re-renders it: without it a control halfway down\n\t\t     put the panel back at Background after each change. --><div data-patch-scope=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(scopeEndpoint(e))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 103, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 113, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" class=\"h-fit space-y-6 rounded-xl border border-border/60 bg-secondary/40 p-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:overscroll-contain\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" data-keep-scroll=\"tune-panel\" class=\"h-fit space-y-6 rounded-xl border border-border/60 bg-secondary/40 p-5 xl:sticky xl:top-6 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto xl:overscroll-contain\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -391,7 +391,7 @@ func Tune() templ.Component {
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(gradientStyle(s.Background))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 131, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 142, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
@@ -758,7 +758,7 @@ func Tune() templ.Component {
 					var templ_7745c5c3_Var31 string
 					templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(withoutHighlight(s.Highlights, i))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 218, Col: 56}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 229, Col: 56}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 					if templ_7745c5c3_Err != nil {
@@ -771,7 +771,7 @@ func Tune() templ.Component {
 					var templ_7745c5c3_Var32 string
 					templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue("Remove marker " + strconv.Itoa(i+1))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 219, Col: 59}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 230, Col: 59}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 					if templ_7745c5c3_Err != nil {
@@ -802,7 +802,7 @@ func Tune() templ.Component {
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(addHighlight(s.Highlights))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 226, Col: 269}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 237, Col: 269}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -905,7 +905,7 @@ func section(e view.Editor, key string, title string, scoped bool, screen model.
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 259, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 270, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 		if templ_7745c5c3_Err != nil {
@@ -923,7 +923,7 @@ func section(e view.Editor, key string, title string, scoped bool, screen model.
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue("/api/projects/" + e.Project.ID + "/screens/" + screen.ID + "/reset")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 264, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 275, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 			if templ_7745c5c3_Err != nil {
@@ -936,7 +936,7 @@ func section(e view.Editor, key string, title string, scoped bool, screen model.
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(`{"section":"` + key + `"}`)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 265, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `client/pages/projects/id.dyn/tune/index.templ`, Line: 276, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 			if templ_7745c5c3_Err != nil {
