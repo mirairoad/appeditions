@@ -42,7 +42,7 @@ what is still missing before the set can be uploaded.
   folder, and a language with no words yet falls back to the one you write in
   rather than rendering blank.
 - **Every device, from the same screens.** A project also ships to as many
-  store slots as you like — iPhone 6.9", iPad 13", Android phone. The same
+  store slots as you like — iPhone Dynamic Island, iPad 13", Android phone. The same
   screens and the same copy are drawn at each one's pixel size with the frame
   that belongs in it, and the export is the product: one folder per device per
   language.
@@ -144,8 +144,8 @@ step and nothing to install to get one.
   appeditions.db                       projects, templates, assets
   nobiru/
     assets/<id>.png                the originals, exactly as they arrived
-    exports/iphone-6-9/en-US/01-everything-in-one-place.png
-    exports/iphone-6-9/ja/01-screen.png
+    exports/iphone-island-medium/en-US/01-everything-in-one-place.png
+    exports/iphone-island-medium/ja/01-screen.png
     exports/ipad-13/en-US/01-everything-in-one-place.png
 ```
 
@@ -160,13 +160,13 @@ A second starred phrase takes the second highlight colour.
 
 ## Export sizes
 
-Only the largest device per family is required — both stores downscale for the
-rest.
+One slot per device family — both stores downscale for the rest. On iPhone,
+App Store Connect requires Dynamic Island (medium); Face ID (medium) is optional.
 
 | Store | Target | Pixels |
 | --- | --- | --- |
-| App Store | iPhone 6.9" | 1320 × 2868 |
-| App Store | iPhone 6.5" | 1242 × 2688 |
+| App Store | iPhone Dynamic Island (medium) | 1206 × 2622 |
+| App Store | iPhone Face ID (medium) | 1170 × 2532 |
 | App Store | iPad 13" | 2064 × 2752 |
 | Google Play | Phone | 1080 × 1920 |
 | Google Play | Tablet | 1600 × 2560 |

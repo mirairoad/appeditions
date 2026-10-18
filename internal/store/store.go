@@ -223,7 +223,7 @@ func (s *Store) AssetsDir(p model.Project) string { return filepath.Join(s.dir(p
 // language inside it.
 //
 // Device first because that is the shape of the upload. App Store Connect asks
-// for a device family and then a localisation, so "the iPhone 6.9-inch set" is
+// for a device family and then a localisation, so "the iPhone Dynamic Island set" is
 // the folder you open and the languages are what is in it. Language first put
 // one device's set in six different places.
 func (s *Store) ExportDir(p model.Project, locale, sizeID string) string {

@@ -137,11 +137,17 @@ var Positions = []model.Position{
 	}},
 }
 
-// Export sizes. Only the largest device in each family is required — the
-// stores downscale for the rest.
+// Export sizes. One per store slot, and the stores downscale for the rest.
+//
+// The iPhone slots are App Store Connect's own categories. Dynamic Island
+// (medium) is the one it requires; Face ID (medium) is optional and falls
+// back to a scaled Dynamic Island set, so it only earns a place when a
+// release wants a picture drawn for the notch rather than one shrunk into it.
+// Each takes the larger of the sizes ASC accepts for it — 1206×2622 over
+// 1179×2556, 1170×2532 over 1125×2436 and 1080×2340.
 var Sizes = []model.ExportSize{
-	{ID: "iphone-6-9", Label: `iPhone 6.9"`, Store: "App Store", W: 1320, H: 2868, Device: "iphone-17-pro"},
-	{ID: "iphone-6-5", Label: `iPhone 6.5"`, Store: "App Store", W: 1242, H: 2688, Device: "iphone-17"},
+	{ID: "iphone-island-medium", Label: "iPhone Dynamic Island (medium)", Store: "App Store", W: 1206, H: 2622, Device: "iphone-17"},
+	{ID: "iphone-faceid-medium", Label: "iPhone Face ID (medium)", Store: "App Store", W: 1170, H: 2532, Device: "iphone-17"},
 	{ID: "ipad-13", Label: `iPad 13"`, Store: "App Store", W: 2064, H: 2752, Device: "ipad-13"},
 	{ID: "android-phone", Label: "Android phone", Store: "Google Play", W: 1080, H: 1920, Device: "pixel-8a"},
 	{ID: "android-phone-tall", Label: "Android phone (tall)", Store: "Google Play", W: 1080, H: 2400, Device: "pixel-9-pro"},

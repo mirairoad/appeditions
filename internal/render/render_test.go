@@ -280,7 +280,7 @@ func TestVisual(t *testing.T) {
 		},
 	}
 
-	size := presets.Size("iphone-6-9")
+	size := presets.Size("iphone-island-medium")
 	for _, tc := range cases {
 		settings := model.DefaultSettings()
 		if tc.mutate != nil {

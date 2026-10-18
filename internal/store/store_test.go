@@ -118,7 +118,7 @@ func TestCreateProjectAppliesTheTemplate(t *testing.T) {
 	if p.Settings.Layout != "hero" {
 		t.Errorf("template settings not applied: layout is %q", p.Settings.Layout)
 	}
-	if p.Settings.SizeID != "iphone-6-9" {
+	if p.Settings.SizeID != "iphone-island-medium" {
 		t.Errorf("export size should survive a template: %q", p.Settings.SizeID)
 	}
 
@@ -577,7 +577,7 @@ func TestVersionsRoundTripWithTheirOwnSlots(t *testing.T) {
 		BaseLocale: "en-US",
 		Locales:    []string{"en-US"},
 		Versions: []model.Version{{ID: "v_1", Name: "1.0", Targets: []model.Target{
-			presets.Target("iphone-6-9"), presets.Target("ipad-13"),
+			presets.Target("iphone-island-medium"), presets.Target("ipad-13"),
 		}}},
 		VersionID: "v_1",
 	}, builtin(t, s, "classic"))

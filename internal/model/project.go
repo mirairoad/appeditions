@@ -98,7 +98,7 @@ func DefaultSettings() Settings {
 		HeadlineScale:    1,
 		SubheadScale:     1,
 		HeadlineTracking: -0.01,
-		SizeID:           "iphone-6-9",
+		SizeID:           "iphone-island-medium",
 	}
 }
 
@@ -296,8 +296,47 @@ func (p *Project) Migrate() {
 	}
 	p.LegacyTargets = nil
 
+	// The inch-named iPhone slots went when App Store Connect renamed its
+	// categories. A stored id the table no longer has would not fail — the
+	// size lookup falls back to the first slot — but the target list would
+	// keep the dead id, so the export would write under the old directory
+	// name and the Release step would show a slot nobody can untick.
+	if to, ok := renamedSizes[p.Settings.SizeID]; ok {
+		p.Settings.SizeID = to
+	}
+	for i := range p.Versions {
+		v := &p.Versions[i]
+		kept := v.Targets[:0]
+		for _, t := range v.Targets {
+			if to, ok := renamedSizes[t.SizeID]; ok {
+				t.SizeID = to
+			}
+			if !hasSize(kept, t.SizeID) {
+				kept = append(kept, t)
+			}
+		}
+		v.Targets = kept
+	}
+
 	p.version() // mints the first version, and repairs a dangling VersionID
 	p.Targets() // and a version with no slot to draw in
+}
+
+// renamedSizes maps retired store-slot ids to the slot that replaced them.
+// The 6.9" set was drawn at 1320×2868 and the 6.5" at 1242×2688; both move
+// to a medium slot, which is what App Store Connect now requires.
+var renamedSizes = map[string]string{
+	"iphone-6-9": "iphone-island-medium",
+	"iphone-6-5": "iphone-faceid-medium",
+}
+
+func hasSize(ts []Target, sizeID string) bool {
+	for _, t := range ts {
+		if t.SizeID == sizeID {
+			return true
+		}
+	}
+	return false
 }
 
 // Screen returns the screen with this id and whether it was found.
