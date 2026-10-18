@@ -18,6 +18,9 @@ var Devices = []model.Device{
 	{ID: "iphone-17", Label: "iPhone 17", Group: "iPhone", ScreenAspect: 1206.0 / 2622, Bezel: 0.032, Radius: 0.150, Notch: model.NotchIsland},
 	{ID: "iphone-se", Label: "iPhone SE", Group: "iPhone", ScreenAspect: 750.0 / 1334, Bezel: 0.045, Radius: 0.095, Notch: model.NotchNone},
 	{ID: "ipad-13", Label: `iPad Pro 13"`, Group: "iPad", ScreenAspect: 2064.0 / 2752, Bezel: 0.026, Radius: 0.055, Notch: model.NotchNone},
+	// The same body as the 13" at 177.5mm wide rather than 215.5mm, so the
+	// same bezel and corner are 1.21× the fraction of the width.
+	{ID: "ipad-11", Label: `iPad Pro 11"`, Group: "iPad", ScreenAspect: 1668.0 / 2420, Bezel: 0.032, Radius: 0.067, Notch: model.NotchNone},
 
 	{ID: "pixel-9-pro", Label: "Pixel 9 Pro", Group: "Android", ScreenAspect: 1280.0 / 2856, Bezel: 0.026, Radius: 0.085, Notch: model.NotchPunch},
 	{ID: "pixel-9-pro-xl", Label: "Pixel 9 Pro XL", Group: "Android", ScreenAspect: 1344.0 / 2992, Bezel: 0.025, Radius: 0.085, Notch: model.NotchPunch},
@@ -30,7 +33,7 @@ var Devices = []model.Device{
 	// A watch is mostly bezel and mostly corner radius, which is why it needs
 	// its own row rather than a scaled phone: at 0.09 bezel and 0.30 radius the
 	// same drawing code produces a watch body.
-	{ID: "watch-ultra", Label: "Apple Watch Ultra", Group: "Watch", ScreenAspect: 410.0 / 502, Bezel: 0.090, Radius: 0.300, Notch: model.NotchNone},
+	{ID: "watch-ultra", Label: "Apple Watch Ultra", Group: "Watch", ScreenAspect: 422.0 / 514, Bezel: 0.090, Radius: 0.300, Notch: model.NotchNone},
 
 	{ID: "none", Label: "No frame", Group: "Other", ScreenAspect: 1320.0 / 2868, Bezel: 0, Radius: 0.045, Notch: model.NotchNone},
 }
@@ -139,24 +142,39 @@ var Positions = []model.Position{
 
 // Export sizes. One per store slot, and the stores downscale for the rest.
 //
-// The iPhone slots are App Store Connect's own categories. Dynamic Island
-// (medium) is the one it requires; Face ID (medium) is optional and falls
-// back to a scaled Dynamic Island set, so it only earns a place when a
-// release wants a picture drawn for the notch rather than one shrunk into it.
-// Each takes the larger of the sizes ASC accepts for it — 1206×2622 over
-// 1179×2556, 1170×2532 over 1125×2436 and 1080×2340.
+// The App Store slots are App Store Connect's own display categories, one for
+// one, named the way it names them, for every category a device on current
+// iOS sits in. Its product page asks for Dynamic Island (medium), iPad 13"
+// and the Watch, which is why the first of those is what a new project draws
+// in (model.DefaultSettings); the rest are optional, and ASC fills a category
+// left empty by scaling a set it does have.
+//
+// Each takes the largest size ASC accepts for its category: 1320×2868 over
+// 1290×2796 and 1260×2736; 1206×2622 over 1179×2556; 1284×2778 over
+// 1242×2688; 1170×2532 over 1125×2436 and 1080×2340; 2064×2752 over 2048×2732;
+// 1668×2420 over 1668×2388, 1640×2360 and 1488×2266; 422×514 over 410×502.
+//
+// Left out on purpose: the Home Button large, 4" and 3.5" iPhones and the
+// 12.9", 10.5" and 9.7" iPads, whose devices current iOS no longer runs on,
+// and iPhone Duo, which ASC requires only from April 2027 and which has no
+// foldable frame here to draw in yet.
+//
+// A Face ID phone has a notch and no frame here draws one, so those slots
+// carry the Dynamic Island body; the frame is the author's to change.
 var Sizes = []model.ExportSize{
+	{ID: "iphone-island-large", Label: "iPhone Dynamic Island (large)", Store: "App Store", W: 1320, H: 2868, Device: "iphone-17-pro"},
 	{ID: "iphone-island-medium", Label: "iPhone Dynamic Island (medium)", Store: "App Store", W: 1206, H: 2622, Device: "iphone-17"},
+	{ID: "iphone-faceid-large", Label: "iPhone Face ID (large)", Store: "App Store", W: 1284, H: 2778, Device: "iphone-17"},
 	{ID: "iphone-faceid-medium", Label: "iPhone Face ID (medium)", Store: "App Store", W: 1170, H: 2532, Device: "iphone-17"},
+	{ID: "iphone-home-medium", Label: "iPhone Home Button (medium)", Store: "App Store", W: 750, H: 1334, Device: "iphone-se"},
 	{ID: "ipad-13", Label: `iPad 13"`, Store: "App Store", W: 2064, H: 2752, Device: "ipad-13"},
+	{ID: "ipad-11", Label: `iPad 11"`, Store: "App Store", W: 1668, H: 2420, Device: "ipad-11"},
 	{ID: "android-phone", Label: "Android phone", Store: "Google Play", W: 1080, H: 1920, Device: "pixel-8a"},
 	{ID: "android-phone-tall", Label: "Android phone (tall)", Store: "Google Play", W: 1080, H: 2400, Device: "pixel-9-pro"},
 	{ID: "android-tablet", Label: "Android tablet", Store: "Google Play", W: 1600, H: 2560, Device: "android-tablet"},
-	// The Ultra's own panel size. Apple's screenshot slot for it has moved
-	// more than once, so this is the panel rather than a slot number to be
-	// stale about: the renderer only needs an aspect ratio it can be trusted
-	// with, and the number is one line to correct.
-	{ID: "watch-ultra", Label: "Apple Watch Ultra", Store: "App Store", W: 410, H: 502, Device: "watch-ultra"},
+	// ASC's one Watch category takes a size per model and the same size in
+	// every language; 422×514 is the Ultra 3 and 4 panel, the largest it lists.
+	{ID: "watch-ultra", Label: "Apple Watch Ultra", Store: "App Store", W: 422, H: 514, Device: "watch-ultra"},
 }
 
 // Target is the store slot for an export size, with the frame that belongs in

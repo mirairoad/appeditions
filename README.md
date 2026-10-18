@@ -42,7 +42,7 @@ what is still missing before the set can be uploaded.
   folder, and a language with no words yet falls back to the one you write in
   rather than rendering blank.
 - **Every device, from the same screens.** A project also ships to as many
-  store slots as you like — iPhone Dynamic Island, iPad 13", Android phone. The same
+  store slots as you like — iPhone, iPad, Apple Watch, Android phone. The same
   screens and the same copy are drawn at each one's pixel size with the frame
   that belongs in it, and the export is the product: one folder per device per
   language.
@@ -160,15 +160,23 @@ A second starred phrase takes the second highlight colour.
 
 ## Export sizes
 
-One slot per device family — both stores downscale for the rest. On iPhone,
-App Store Connect requires Dynamic Island (medium); Face ID (medium) is optional.
+The App Store slots are App Store Connect's own display categories, one for
+one, each at the largest size it accepts. Its product page asks for iPhone
+Dynamic Island (medium), iPad 13" and Apple Watch; the rest are optional, and
+App Store Connect fills a category you leave empty by scaling one you upload.
 
 | Store | Target | Pixels |
 | --- | --- | --- |
+| App Store | iPhone Dynamic Island (large) | 1320 × 2868 |
 | App Store | iPhone Dynamic Island (medium) | 1206 × 2622 |
+| App Store | iPhone Face ID (large) | 1284 × 2778 |
 | App Store | iPhone Face ID (medium) | 1170 × 2532 |
+| App Store | iPhone Home Button (medium) | 750 × 1334 |
 | App Store | iPad 13" | 2064 × 2752 |
+| App Store | iPad 11" | 1668 × 2420 |
+| App Store | Apple Watch Ultra | 422 × 514 |
 | Google Play | Phone | 1080 × 1920 |
+| Google Play | Phone (tall) | 1080 × 2400 |
 | Google Play | Tablet | 1600 × 2560 |
 
 > **Alpha channel.** App Store Connect rejects images carrying one, and a PNG

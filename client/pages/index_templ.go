@@ -736,7 +736,7 @@ func newProjectModal(v view.Projects) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</select> <span class=\"block text-xs text-muted-foreground\">Changeable at any time — a template is a reset, not a commitment.</span></label></div><fieldset class=\"space-y-2\"><legend class=\"text-sm font-medium\">Devices</legend><p class=\"text-xs text-muted-foreground\">Tick every device family you ship to — iPhone, iPad and Android at once if you like. The same screens and the same copy are drawn at each, and each gets its own export folder. Only the largest device per family is required; both stores downscale for the rest.</p><div class=\"flex flex-wrap gap-1.5 pt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</select> <span class=\"block text-xs text-muted-foreground\">Changeable at any time — a template is a reset, not a commitment.</span></label></div><fieldset class=\"space-y-2\"><legend class=\"text-sm font-medium\">Devices</legend><p class=\"text-xs text-muted-foreground\">Tick every device family you ship to — iPhone, iPad and Android at once if you like. The same screens and the same copy are drawn at each, and each gets its own export folder. One size per family is enough; both stores scale it for the rest.</p><div class=\"flex flex-wrap gap-1.5 pt-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -758,7 +758,7 @@ func newProjectModal(v view.Projects) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if size.ID == "iphone-6-9" {
+				if size.ID == "iphone-island-medium" {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, " checked")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
